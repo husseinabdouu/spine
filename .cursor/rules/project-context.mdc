@@ -1,0 +1,15 @@
+---
+description: Project vision, goals, and context - read before every conversation
+alwaysApply: true
+---
+
+# Project Context
+
+For every conversation in this project, read and apply the context from these files:
+
+- `docs/cursor-context/VISION.md` - Project vision and big picture
+- `docs/cursor-context/GOALS.md` - Goals and objectives
+- `docs/cursor-context/CONTEXT.md` - General context, architecture, conventions
+- `docs/cursor-context/DECISIONS.md` - Important decisions and constraints
+
+Apply this context to all suggestions, code, and responses. Align with the vision and goals.
