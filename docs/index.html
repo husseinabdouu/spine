@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spine — Know Yourself. Spend Better.</title>
+    <meta name="description" content="The only finance app that reads your biometrics before your bank statement. Connect your body. Connect your bank. Understand the pattern." />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+
+    <!-- NAV -->
+    <nav id="navbar">
+      <div class="nav-inner">
+        <a href="#" class="nav-logo">SPINE</a>
+        <div class="nav-links">
+          <a href="#how-it-works">How It Works</a>
+          <a href="#features">Features</a>
+          <a href="#privacy">Privacy</a>
+        </div>
+        <a href="#early-access" class="btn-primary nav-cta">Get Early Access</a>
+      </div>
+    </nav>
+
+    <!-- HERO -->
+    <section id="hero">
+      <div class="hero-inner">
+        <div class="hero-text">
+          <div class="hero-eyebrow">
+            <span class="dot-pulse"></span>
+            <span>Behavioral Finance Intelligence</span>
+          </div>
+          <h1 class="hero-headline">
+            Your brain is<br />
+            spending money.<br />
+            <span class="gradient-text">Spine knows why.</span>
+          </h1>
+          <p class="hero-sub">
+            The only finance app that reads your biometrics before your bank statement.
+            Connect your body. Connect your bank. Understand the pattern.
+          </p>
+          <div class="hero-ctas">
+            <a href="#early-access" class="btn-primary btn-glow">Get Early Access</a>
+            <a href="#how-it-works" class="btn-ghost">See How It Works →</a>
+          </div>
+          <div class="hero-chips">
+            <div class="chip chip-danger">💤 4.8 hrs sleep → High Risk Day</div>
+            <div class="chip chip-warning">❤️ HRV 42ms → Moderate Risk</div>
+            <div class="chip chip-safe">⚡ 890 cal active → Low Risk Day</div>
+          </div>
+        </div>
+
+        <div class="hero-reactor">
+          <svg class="reactor-svg" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+            <!-- Outer grid rings -->
+            <circle cx="150" cy="150" r="140" class="ring ring-outer-bg" />
+            <!-- Scan ring -->
+            <circle cx="150" cy="150" r="140" class="ring ring-scan" />
+            <!-- Tick marks -->
+            <g class="tick-marks"></g>
+            <!-- Middle ring bg -->
+            <circle cx="150" cy="150" r="105" class="ring ring-mid-bg" />
+            <!-- Middle ring animated -->
+            <circle cx="150" cy="150" r="105" class="ring ring-mid" />
+            <!-- Inner ring bg -->
+            <circle cx="150" cy="150" r="70" class="ring ring-inner-bg" />
+            <!-- Inner ring animated -->
+            <circle cx="150" cy="150" r="70" class="ring ring-inner" />
+            <!-- Core -->
+            <circle cx="150" cy="150" r="30" class="core-outer" />
+            <circle cx="150" cy="150" r="20" class="core-mid" />
+            <circle cx="150" cy="150" r="10" class="core-inner" />
+            <!-- Data labels -->
+            <text x="150" y="24" class="ring-label">HRV</text>
+            <text x="264" y="155" class="ring-label">SLEEP</text>
+            <text x="150" y="290" class="ring-label">SPEND</text>
+            <text x="18" y="155" class="ring-label">RISK</text>
+            <!-- Triangle inner marks -->
+            <polygon points="150,125 140,145 160,145" class="core-mark" />
+          </svg>
+          <!-- Glow behind reactor -->
+          <div class="reactor-glow"></div>
+          <!-- HUD corner decorations -->
+          <div class="hud-corner hud-tl"></div>
+          <div class="hud-corner hud-tr"></div>
+          <div class="hud-corner hud-bl"></div>
+          <div class="hud-corner hud-br"></div>
+        </div>
+      </div>
+
+      <!-- Background grid -->
+      <div class="hero-grid"></div>
+      <!-- Scanline overlay -->
+      <div class="scanline"></div>
+    </section>
+
+    <!-- THE PROBLEM -->
+    <section id="problem" class="section-dark">
+      <div class="container">
+        <div class="section-eyebrow reveal">The Problem</div>
+        <h2 class="section-title reveal">Meet the <span class="gradient-text">Behavioral Tax.</span></h2>
+        <p class="section-sub reveal">
+          When your body is compromised, your financial judgment follows.
+          You've been paying a hidden tax — and you didn't even know it had a name.
+        </p>
+
+        <div class="stats-grid reveal">
+          <div class="stat-card">
+            <div class="stat-number" data-target="47">0</div>
+            <div class="stat-suffix">%</div>
+            <div class="stat-label">more spending on poor-sleep days</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" data-target="3">0</div>
+            <div class="stat-suffix">.7×</div>
+            <div class="stat-label">more impulse purchases when stressed</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" data-target="68">0</div>
+            <div class="stat-suffix">%</div>
+            <div class="stat-label">of financial regret tied to low-HRV days</div>
+          </div>
+        </div>
+
+        <div class="problem-visual reveal">
+          <div class="pv-left">
+            <div class="pv-label">Low-energy day</div>
+            <div class="pv-metrics">
+              <div class="pv-metric bad">
+                <span class="pv-icon">💤</span>
+                <div>
+                  <div class="pv-metric-val">4.8 hrs</div>
+                  <div class="pv-metric-name">Sleep</div>
+                </div>
+              </div>
+              <div class="pv-metric bad">
+                <span class="pv-icon">❤️</span>
+                <div>
+                  <div class="pv-metric-val">38 ms</div>
+                  <div class="pv-metric-name">HRV</div>
+                </div>
+              </div>
+              <div class="pv-metric bad">
+                <span class="pv-icon">⚡</span>
+                <div>
+                  <div class="pv-metric-val">240 cal</div>
+                  <div class="pv-metric-name">Activity</div>
+                </div>
+              </div>
+            </div>
+            <div class="pv-spend bad-spend">
+              <div class="pv-spend-label">Spending</div>
+              <div class="pv-spend-bar">
+                <div class="pv-spend-fill bad-fill"></div>
+              </div>
+              <div class="pv-spend-val">$284</div>
+            </div>
+          </div>
+
+          <div class="pv-vs">VS</div>
+
+          <div class="pv-right">
+            <div class="pv-label">High-energy day</div>
+            <div class="pv-metrics">
+              <div class="pv-metric good">
+                <span class="pv-icon">💤</span>
+                <div>
+                  <div class="pv-metric-val">8.2 hrs</div>
+                  <div class="pv-metric-name">Sleep</div>
+                </div>
+              </div>
+              <div class="pv-metric good">
+                <span class="pv-icon">❤️</span>
+                <div>
+                  <div class="pv-metric-val">72 ms</div>
+                  <div class="pv-metric-name">HRV</div>
+                </div>
+              </div>
+              <div class="pv-metric good">
+                <span class="pv-icon">⚡</span>
+                <div>
+                  <div class="pv-metric-val">1,240 cal</div>
+                  <div class="pv-metric-name">Activity</div>
+                </div>
+              </div>
+            </div>
+            <div class="pv-spend good-spend">
+              <div class="pv-spend-label">Spending</div>
+              <div class="pv-spend-bar">
+                <div class="pv-spend-fill good-fill"></div>
+              </div>
+              <div class="pv-spend-val">$94</div>
+            </div>
+          </div>
+        </div>
+
+        <p class="problem-caption reveal">Same person. Different day. $190 difference. That's the behavioral tax.</p>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section id="how-it-works">
+      <div class="container">
+        <div class="section-eyebrow reveal">How It Works</div>
+        <h2 class="section-title reveal">Three inputs. <span class="gradient-text">One truth.</span></h2>
+        <p class="section-sub reveal">
+          Spine doesn't guess. It correlates your real body data with your real spending
+          to reveal the patterns you've never been able to see.
+        </p>
+
+        <div class="steps-grid">
+          <div class="step-card reveal">
+            <div class="step-number">01</div>
+            <div class="step-icon">🏦</div>
+            <h3>Connect Your Bank</h3>
+            <p>
+              Link your accounts via Plaid — the same technology used by thousands of
+              financial apps. Your real transactions, automatically synced.
+              No manual entry. No spreadsheets.
+            </p>
+            <div class="step-tag">Plaid · Bank-level security</div>
+          </div>
+
+          <div class="step-card reveal">
+            <div class="step-number">02</div>
+            <div class="step-icon">🍎</div>
+            <h3>Sync Your Body</h3>
+            <p>
+              Run a simple iOS Shortcut that pulls your Apple Health data —
+              sleep hours, HRV (heart rate variability), and active energy.
+              One tap. Automatic. Private.
+            </p>
+            <div class="step-tag">Apple Health · iOS Shortcut</div>
+          </div>
+
+          <div class="step-card reveal">
+            <div class="step-number">03</div>
+            <div class="step-icon">🧠</div>
+            <h3>Get Your Score</h3>
+            <p>
+              Claude AI cross-references your health state with your spending patterns
+              to generate a <strong>Behavioral Risk Score</strong> — and tells you exactly
+              what it means, in plain English.
+            </p>
+            <div class="step-tag">Claude AI · Behavioral analysis</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCORE DEMO -->
+    <section id="score-demo" class="section-dark">
+      <div class="container">
+        <div class="section-eyebrow reveal">Interactive Demo</div>
+        <h2 class="section-title reveal">Your <span class="gradient-text">Behavioral Risk Score.</span></h2>
+        <p class="section-sub reveal">
+          Drag the slider to see how your body state affects your risk profile.
+        </p>
+
+        <div class="score-layout reveal">
+          <div class="score-dial-wrapper">
+            <svg class="score-svg" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+              <!-- Track -->
+              <circle
+                id="score-track"
+                cx="110" cy="110" r="90"
+                fill="none"
+                stroke="#1a2240"
+                stroke-width="12"
+                stroke-dasharray="424 566"
+                stroke-linecap="round"
+                transform="rotate(135 110 110)"
+              />
+              <!-- Value arc -->
+              <circle
+                id="score-arc"
+                cx="110" cy="110" r="90"
+                fill="none"
+                stroke="#00d4ff"
+                stroke-width="12"
+                stroke-dasharray="0 566"
+                stroke-linecap="round"
+                transform="rotate(135 110 110)"
+              />
+              <!-- Center text -->
+              <text id="score-number" x="110" y="104" class="score-num-text">72</text>
+              <text id="score-level" x="110" y="128" class="score-level-text">HIGH RISK</text>
+            </svg>
+            <div class="score-slider-wrap">
+              <span class="slider-label">LOW</span>
+              <input type="range" id="score-slider" min="0" max="100" value="72" class="score-slider" />
+              <span class="slider-label">HIGH</span>
+            </div>
+          </div>
+
+          <div class="score-insights">
+            <div id="score-status-badge" class="score-badge badge-danger">⚠ HIGH RISK</div>
+            <h3 id="score-insight-title">Defer non-essential spending today.</h3>
+            <ul id="score-insight-list" class="insight-list">
+              <li>Your HRV is 31% below your 7-day baseline — impulse control is reduced</li>
+              <li>Last night's sleep was 4.2 hrs below optimal — decision fatigue is elevated</li>
+              <li>Spending last week spiked 68% on similar-state days</li>
+              <li>Recommend: review cart before checkout · delay subscriptions · avoid browsing</li>
+            </ul>
+            <div class="score-health-summary">
+              <div class="shs-item">
+                <span class="shs-icon">💤</span>
+                <span id="shs-sleep">4.8 hrs sleep</span>
+              </div>
+              <div class="shs-item">
+                <span class="shs-icon">❤️</span>
+                <span id="shs-hrv">38 ms HRV</span>
+              </div>
+              <div class="shs-item">
+                <span class="shs-icon">⚡</span>
+                <span id="shs-energy">240 cal active</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features">
+      <div class="container">
+        <div class="section-eyebrow reveal">Features</div>
+        <h2 class="section-title reveal">Everything you need. <span class="gradient-text">Nothing you don't.</span></h2>
+
+        <div class="features-grid">
+          <div class="feature-card reveal">
+            <div class="feature-icon">🏦</div>
+            <h3>Plaid Integration</h3>
+            <p>Connect any major bank or credit card. Transactions sync automatically — no manual logging, ever.</p>
+          </div>
+          <div class="feature-card reveal">
+            <div class="feature-icon">🍎</div>
+            <h3>Apple Health Sync</h3>
+            <p>One-tap iOS Shortcut pulls your sleep, HRV, and activity data directly from Apple Health.</p>
+          </div>
+          <div class="feature-card reveal">
+            <div class="feature-icon">🧠</div>
+            <h3>Claude AI Analysis</h3>
+            <p>Not just charts — plain-English behavioral insights generated by Claude that actually explain your patterns.</p>
+          </div>
+          <div class="feature-card reveal">
+            <div class="feature-icon">📊</div>
+            <h3>Spending Trends</h3>
+            <p>Weekly and monthly spending visualized alongside your health metrics. See the correlation in real time.</p>
+          </div>
+          <div class="feature-card reveal">
+            <div class="feature-icon">⚡</div>
+            <h3>Daily Risk Score</h3>
+            <p>Every morning, your Behavioral Risk Score updates. Know before you open your wallet what kind of day it is.</p>
+          </div>
+          <div class="feature-card reveal">
+            <div class="feature-icon">🔒</div>
+            <h3>Privacy First</h3>
+            <p>Row-level security via Supabase. Your data is yours. We never sell it, share it, or train models on it.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRIVACY -->
+    <section id="privacy" class="section-dark">
+      <div class="container">
+        <div class="privacy-card reveal">
+          <div class="privacy-icon">🛡</div>
+          <h2>Your data. Your vault.</h2>
+          <p>
+            Spine handles two of the most sensitive data types that exist — your finances and your body.
+            We take that seriously. Row-level security ensures no one, not even us, can read your data.
+            No selling. No sharing. No model training. Encrypted at rest and in transit.
+          </p>
+          <div class="privacy-tags">
+            <span class="ptag">Supabase RLS</span>
+            <span class="ptag">Plaid bank-grade security</span>
+            <span class="ptag">Apple Health — on-device</span>
+            <span class="ptag">No third-party data sharing</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- EARLY ACCESS -->
+    <section id="early-access">
+      <div class="container">
+        <div class="cta-section reveal">
+          <div class="cta-reactor-bg"></div>
+          <div class="section-eyebrow">Early Access</div>
+          <h2 class="section-title">Be first to know when<br /><span class="gradient-text">your Spine is ready.</span></h2>
+          <p class="section-sub">One email. No spam. Just the launch date.</p>
+          <form class="cta-form" id="cta-form" onsubmit="handleSignup(event)">
+            <input
+              type="email"
+              id="email-input"
+              placeholder="your@email.com"
+              class="email-input"
+              required
+            />
+            <button type="submit" class="btn-primary btn-glow">Notify Me</button>
+          </form>
+          <p id="form-success" class="form-success hidden">
+            ✓ You're on the list. We'll be in touch.
+          </p>
+          <p class="cta-note">Built for people who sleep too little and spend too much.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="container footer-inner">
+        <div class="footer-logo">SPINE</div>
+        <div class="footer-links">
+          <a href="/spine/privacy">Privacy Policy</a>
+          <a href="/spine/security-policy">Security Policy</a>
+          <a href="/spine/data-policy">Data Policy</a>
+        </div>
+        <p class="footer-copy">© 2026 Hussein Abdou · Built with too little sleep.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
