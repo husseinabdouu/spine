@@ -57,13 +57,27 @@ if (statsGrid) statObserver.observe(statsGrid);
 
 /* ─── Navbar scroll effect ─── */
 const navbar = document.getElementById('navbar');
+
+/* ─── Honeycomb parallax ─── */
+/* The #hex-bg div is position:fixed so it never adds page height.
+   Shifting background-position on scroll makes the tiles "move with you". */
+const hexBg = document.getElementById('hex-bg');
+
 window.addEventListener('scroll', () => {
-  if (window.scrollY > 60) {
+  const y = window.scrollY;
+
+  // Navbar
+  if (y > 60) {
     navbar.style.background = 'rgba(4, 5, 6, 0.97)';
     navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.1)';
   } else {
     navbar.style.background = 'rgba(4, 5, 6, 0.85)';
     navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.07)';
+  }
+
+  // Honeycomb moves with scroll at ~85% speed — tiles repeat infinitely so it never runs out
+  if (hexBg) {
+    hexBg.style.backgroundPosition = `50% ${-y * 0.85}px`;
   }
 }, { passive: true });
 
