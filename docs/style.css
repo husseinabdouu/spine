@@ -27,7 +27,7 @@
   --gold:         #C9A84C;
   --gold-glow:    rgba(201, 168, 76, 0.3);
   --font:         'Space Grotesk', system-ui, sans-serif;
-  --font-display: 'Syne', system-ui, sans-serif;
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
   --mono:         'JetBrains Mono', 'Fira Code', monospace;
   /* Glass system */
   --glass-bg:     rgba(255, 255, 255, 0.07);
