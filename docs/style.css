@@ -207,18 +207,67 @@ section {
   line-height: 1.65;
 }
 
+/* ─── Scroll progress bar ─── */
+#scroll-progress {
+  position: fixed;
+  top: 0; left: 0;
+  height: 2px;
+  width: 0%;
+  background: linear-gradient(90deg, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.2) 100%);
+  z-index: 300;
+  pointer-events: none;
+  transition: width 0.08s linear;
+}
+
+/* ─── Cursor ambient glow ─── */
+#cursor-glow {
+  position: fixed;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.035) 0%, transparent 65%);
+  pointer-events: none;
+  z-index: 0;
+  transform: translate(-50%, -50%);
+  transition: left 0.12s ease, top 0.12s ease;
+  will-change: left, top;
+}
+
 /* ============================================================
-   NAV
+   NAV — liquid glass on scroll
    ============================================================ */
 #navbar {
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 100;
-  background: rgba(4, 5, 6, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(4, 5, 6, 0.88);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  transition: background 0.3s;
+  border-radius: 0;
+  box-shadow: none;
+  transition:
+    top           0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    left          0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    right         0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    border-radius 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    background    0.35s ease,
+    border-color  0.35s ease,
+    box-shadow    0.5s ease;
+}
+
+/* Floating pill state — applied via JS on scroll */
+#navbar.floating {
+  top: 12px;
+  left: 20px;
+  right: 20px;
+  border-radius: 18px;
+  background: rgba(10, 12, 16, 0.68);
+  border-bottom-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .nav-inner {
@@ -243,11 +292,10 @@ section {
   flex-shrink: 0;
 }
 
-.nav-logo-img {
+.logo-svg {
   height: 30px;
   width: auto;
-  mix-blend-mode: screen;
-  opacity: 0.9;
+  opacity: 0.88;
 }
 
 .nav-links {
@@ -433,7 +481,8 @@ section {
   overflow: hidden;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  transition: border-color 0.3s, transform 0.3s;
+  transition: border-color 0.3s, transform 0.08s ease, box-shadow 0.08s ease;
+  will-change: transform;
 }
 
 .stat-card::before {
@@ -448,7 +497,6 @@ section {
 
 .stat-card:hover {
   border-color: rgba(255,255,255,0.18);
-  transform: translateY(-4px);
 }
 .stat-card:hover::before { opacity: 1; }
 
@@ -596,7 +644,8 @@ section {
   overflow: hidden;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+  transition: border-color 0.3s, transform 0.08s ease, box-shadow 0.08s ease;
+  will-change: transform;
 }
 
 .step-card::before {
@@ -610,8 +659,6 @@ section {
 
 .step-card:hover {
   border-color: rgba(255,255,255,0.18);
-  transform: translateY(-6px);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 .step-card:hover::before { opacity: 1; }
 
@@ -844,9 +891,10 @@ section {
   padding: 28px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+  transition: border-color 0.3s, transform 0.08s ease, box-shadow 0.08s ease;
   position: relative;
   overflow: hidden;
+  will-change: transform;
 }
 
 .feature-card::before {
@@ -861,8 +909,6 @@ section {
 
 .feature-card:hover {
   border-color: rgba(255,255,255,0.18);
-  transform: translateY(-4px);
-  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
 }
 .feature-card:hover::before { opacity: 1; }
 
@@ -1059,14 +1105,12 @@ footer {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.22em;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.28);
 }
 
-.footer-logo-img {
-  height: 22px;
-  width: auto;
-  mix-blend-mode: screen;
-  opacity: 0.3;
+.footer-logo .logo-svg {
+  height: 20px;
+  opacity: 0.28;
 }
 
 .footer-links {

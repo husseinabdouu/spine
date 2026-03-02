@@ -55,31 +55,71 @@ const statObserver = new IntersectionObserver(
 const statsGrid = document.querySelector('.stats-grid');
 if (statsGrid) statObserver.observe(statsGrid);
 
-/* ─── Navbar scroll effect ─── */
-const navbar = document.getElementById('navbar');
-
-/* ─── Honeycomb parallax ─── */
-/* The #hex-bg div is position:fixed so it never adds page height.
-   Shifting background-position on scroll makes the tiles "move with you". */
-const hexBg = document.getElementById('hex-bg');
+/* ─── Navbar liquid glass ─── */
+const navbar   = document.getElementById('navbar');
+const hexBg    = document.getElementById('hex-bg');
+const progress = document.getElementById('scroll-progress');
 
 window.addEventListener('scroll', () => {
-  const y = window.scrollY;
+  const y     = window.scrollY;
+  const total = document.body.scrollHeight - window.innerHeight;
 
-  // Navbar
-  if (y > 60) {
-    navbar.style.background = 'rgba(4, 5, 6, 0.97)';
-    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.1)';
+  // Liquid glass pill after 80px
+  if (y > 80) {
+    navbar.classList.add('floating');
   } else {
-    navbar.style.background = 'rgba(4, 5, 6, 0.85)';
-    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.07)';
+    navbar.classList.remove('floating');
   }
 
-  // Honeycomb moves with scroll at ~85% speed — tiles repeat infinitely so it never runs out
-  if (hexBg) {
-    hexBg.style.backgroundPosition = `50% ${-y * 0.85}px`;
-  }
+  // Honeycomb parallax
+  if (hexBg) hexBg.style.backgroundPosition = `50% ${-y * 0.85}px`;
+
+  // Scroll progress bar
+  if (progress) progress.style.width = `${Math.min((y / total) * 100, 100)}%`;
+
 }, { passive: true });
+
+/* ─── Cursor ambient glow ─── */
+const cursorGlow = document.getElementById('cursor-glow');
+if (cursorGlow) {
+  let mouseX = -999, mouseY = -999;
+  document.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    cursorGlow.style.left = mouseX + 'px';
+    cursorGlow.style.top  = mouseY + 'px';
+  });
+  document.addEventListener('mouseleave', () => {
+    cursorGlow.style.left = '-999px';
+    cursorGlow.style.top  = '-999px';
+  });
+}
+
+/* ─── 3D card tilt on hover ─── */
+function addTilt(selector, maxDeg = 7) {
+  document.querySelectorAll(selector).forEach(card => {
+    card.addEventListener('mousemove', (e) => {
+      const r  = card.getBoundingClientRect();
+      const x  = (e.clientX - r.left)  / r.width  - 0.5; // -0.5 → 0.5
+      const y  = (e.clientY - r.top)   / r.height - 0.5;
+      card.style.transform = `perspective(900px) rotateX(${-y * maxDeg}deg) rotateY(${x * maxDeg}deg) translateZ(6px)`;
+      card.style.boxShadow = `${-x * 24}px ${-y * 24}px 48px rgba(0,0,0,0.45)`;
+    });
+    card.addEventListener('mouseleave', () => {
+      card.style.transition = 'transform 0.5s ease, box-shadow 0.5s ease, border-color 0.3s';
+      card.style.transform  = '';
+      card.style.boxShadow  = '';
+      // Remove the slow-return transition after it completes
+      card.addEventListener('transitionend', () => {
+        card.style.transition = '';
+      }, { once: true });
+    });
+  });
+}
+
+addTilt('.step-card',    7);
+addTilt('.feature-card', 6);
+addTilt('.stat-card',    5);
 
 /* ─── Interactive Score Dial ─── */
 (function scoreDialInit() {
