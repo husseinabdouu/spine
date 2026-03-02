@@ -380,48 +380,38 @@ section {
 .chip-warning { background: var(--warn-dim);   border-color: rgba(245,158,11,0.25); color: #fbbf24; }
 .chip-safe    { background: var(--safe-dim);   border-color: rgba(34,197,94,0.25);  color: #4ade80; }
 
-/* ─── Hero logo visual ─── */
-.hero-logo-visual {
-  position: relative;
+/* ─── Hero spine data visualization ─── */
+.hero-spine-visual {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 320px;
-  height: 380px;
-  margin: 0 auto;
+  padding: 20px 0;
 }
 
-.hero-logo-glow {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 240px;
-  height: 340px;
-  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.08) 0%, transparent 65%);
-  border-radius: 50%;
-  animation: logo-glow-pulse 3.5s ease-in-out infinite;
-  pointer-events: none;
+.spine-metric-svg {
+  width: 280px;
+  height: 360px;
+  overflow: visible;
 }
 
-.hero-logo-hero-img {
-  height: 260px;
-  width: auto;
-  mix-blend-mode: screen;
-  position: relative;
-  z-index: 1;
-  filter: drop-shadow(0 0 28px rgba(255, 255, 255, 0.2));
-  animation: logo-float 4.5s ease-in-out infinite;
+/* SVG text classes (referenced in the inline SVG) */
+.sv-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  fill: rgba(255, 255, 255, 0.32);
+  text-transform: uppercase;
 }
 
-@keyframes logo-float {
-  0%, 100% { transform: translateY(0px); }
-  50%       { transform: translateY(-14px); }
+.sv-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
 }
 
-@keyframes logo-glow-pulse {
-  0%, 100% { opacity: 0.45; transform: translate(-50%, -50%) scale(1); }
-  50%       { opacity: 0.9;  transform: translate(-50%, -50%) scale(1.15); }
-}
+.sv-good { fill: #4ade80; }
+.sv-warn { fill: #fbbf24; }
+.sv-bad  { fill: #f87171; }
 
 /* ============================================================
    THE PROBLEM
@@ -1106,13 +1096,9 @@ footer {
     grid-template-columns: 1fr;
     text-align: center;
   }
-  .hero-logo-visual {
-    width: 240px;
-    height: 280px;
-    order: -1;
-  }
-  .hero-logo-hero-img { height: 200px; }
-  .hero-text  { order: 1; }
+  .hero-spine-visual { order: -1; }
+  .spine-metric-svg  { width: 220px; height: 290px; }
+  .hero-text         { order: 1; }
   .hero-sub, .hero-chips { margin-left: auto; margin-right: auto; }
   .hero-ctas  { justify-content: center; }
   .hero-chips { align-items: center; }
