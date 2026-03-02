@@ -59,11 +59,11 @@ if (statsGrid) statObserver.observe(statsGrid);
 const navbar = document.getElementById('navbar');
 window.addEventListener('scroll', () => {
   if (window.scrollY > 60) {
-    navbar.style.background = 'rgba(8, 8, 8, 0.97)';
-    navbar.style.borderBottomColor = 'rgba(201, 168, 76, 0.15)';
+    navbar.style.background = 'rgba(4, 5, 6, 0.97)';
+    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.1)';
   } else {
-    navbar.style.background = 'rgba(8, 8, 8, 0.88)';
-    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.06)';
+    navbar.style.background = 'rgba(4, 5, 6, 0.85)';
+    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.07)';
   }
 }, { passive: true });
 
@@ -266,9 +266,9 @@ window.addEventListener('scroll', () => {
   ];
 
   const styles = {
-    0: { fill: 'rgba(201,168,76,0.14)', stroke: 'rgba(201,168,76,0.9)',  sw: 1.5 },
-    1: { fill: 'rgba(201,168,76,0.05)', stroke: 'rgba(201,168,76,0.45)', sw: 1.0 },
-    2: { fill: 'rgba(201,168,76,0.02)', stroke: 'rgba(201,168,76,0.16)', sw: 0.7 },
+    0: { fill: 'rgba(255,255,255,0.08)', stroke: 'rgba(255,255,255,0.75)', sw: 1.5 },
+    1: { fill: 'rgba(255,255,255,0.03)', stroke: 'rgba(255,255,255,0.3)',  sw: 1.0 },
+    2: { fill: 'rgba(255,255,255,0.01)', stroke: 'rgba(255,255,255,0.1)',  sw: 0.7 },
   };
 
   cells.forEach(cell => {
@@ -290,7 +290,7 @@ window.addEventListener('scroll', () => {
       text.setAttribute('y', y + 1);
       text.setAttribute('text-anchor', 'middle');
       text.setAttribute('dominant-baseline', 'middle');
-      text.setAttribute('fill', 'rgba(201,168,76,0.55)');
+      text.setAttribute('fill', 'rgba(255,255,255,0.45)');
       text.setAttribute('font-size', '7');
       text.setAttribute('font-family', 'JetBrains Mono, monospace');
       text.setAttribute('letter-spacing', '0.12em');
@@ -304,7 +304,7 @@ window.addEventListener('scroll', () => {
   dot.setAttribute('cx', CX);
   dot.setAttribute('cy', CY);
   dot.setAttribute('r', 4);
-  dot.setAttribute('fill', '#C9A84C');
+  dot.setAttribute('fill', 'rgba(255,255,255,0.8)');
   dot.classList.add('hex-core-dot');
   svg.appendChild(dot);
 })();
