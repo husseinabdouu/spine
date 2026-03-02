@@ -79,21 +79,7 @@ window.addEventListener('scroll', () => {
 
 }, { passive: true });
 
-/* ─── Cursor ambient glow ─── */
-const cursorGlow = document.getElementById('cursor-glow');
-if (cursorGlow) {
-  let mouseX = -999, mouseY = -999;
-  document.addEventListener('mousemove', (e) => {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
-    cursorGlow.style.left = mouseX + 'px';
-    cursorGlow.style.top  = mouseY + 'px';
-  });
-  document.addEventListener('mouseleave', () => {
-    cursorGlow.style.left = '-999px';
-    cursorGlow.style.top  = '-999px';
-  });
-}
+/* cursor glow removed */
 
 /* ─── 3D card tilt on hover ─── */
 function addTilt(selector, maxDeg = 7) {
