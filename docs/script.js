@@ -59,11 +59,11 @@ if (statsGrid) statObserver.observe(statsGrid);
 const navbar = document.getElementById('navbar');
 window.addEventListener('scroll', () => {
   if (window.scrollY > 60) {
-    navbar.style.background = 'rgba(8, 8, 8, 0.96)';
-    navbar.style.borderBottomColor = 'rgba(201, 168, 76, 0.2)';
+    navbar.style.background = 'rgba(8, 8, 8, 0.97)';
+    navbar.style.borderBottomColor = 'rgba(201, 168, 76, 0.15)';
   } else {
-    navbar.style.background = 'rgba(8, 8, 8, 0.8)';
-    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.07)';
+    navbar.style.background = 'rgba(8, 8, 8, 0.88)';
+    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.06)';
   }
 }, { passive: true });
 

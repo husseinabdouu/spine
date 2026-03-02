@@ -12,9 +12,9 @@
 
 :root {
   --bg:           #080808;
-  --bg-2:         #0e0e0e;
-  --bg-card:      #141414;
-  --bg-card-2:    #1a1a1a;
+  --bg-2:         rgba(0, 0, 0, 0.38);
+  --bg-card:      #212121;
+  --bg-card-2:    #282828;
   --gold:         #C9A84C;
   --gold-bright:  #DFC06A;
   --gold-deep:    #9A7A28;
@@ -40,7 +40,9 @@
 html { scroll-behavior: smooth; }
 
 body {
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100'%3E%3Cpolygon points='28%2C1 55%2C17 55%2C49 28%2C65 1%2C49 1%2C17' fill='%231c1c1c' stroke='%23080808' stroke-width='1'/%3E%3Cpolygon points='1%2C51 28%2C66 28%2C100 1%2C100' fill='%231c1c1c' stroke='%23080808' stroke-width='1'/%3E%3Cpolygon points='28%2C66 55%2C51 55%2C100 28%2C100' fill='%231c1c1c' stroke='%23080808' stroke-width='1'/%3E%3C/svg%3E");
+  background-size: 112px 200px;
   color: var(--text);
   font-family: var(--font);
   font-size: 16px;
@@ -139,11 +141,15 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ─── Section common ─── */
-section { padding: 100px 0; }
+section {
+  padding: 100px 0;
+  background: transparent;
+}
 
 .section-dark {
   background: var(--bg-2);
   position: relative;
+  backdrop-filter: blur(0px);
 }
 
 .section-eyebrow {
@@ -180,10 +186,10 @@ section { padding: 100px 0; }
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 100;
-  background: rgba(8, 8, 8, 0.8);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border);
+  background: rgba(8, 8, 8, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   transition: background 0.3s, border-color 0.3s;
 }
 
@@ -240,21 +246,14 @@ section { padding: 100px 0; }
   padding: 0;
 }
 
-/* Honeycomb background */
-.hero-honeycomb {
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100'%3E%3Cpath d='M28 66L0 50L0 16L28 0L56 16L56 50L28 66L28 100M56 100L56 66M0 100L0 66' fill='none' stroke='rgba(201%2C168%2C76%2C0.08)' stroke-width='1'/%3E%3C/svg%3E");
-  background-size: 56px 100px;
-  pointer-events: none;
-}
-
-/* Radial fade over honeycomb so it's stronger on edges, fades to center */
-.hero-honeycomb::after {
+/* Subtle vignette to pull focus toward center of hero */
+#hero::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse 70% 70% at 60% 50%, var(--bg) 30%, transparent 80%);
+  background: radial-gradient(ellipse 80% 80% at 50% 50%, rgba(8,8,8,0.15) 0%, rgba(8,8,8,0.55) 100%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .hero-inner {
@@ -267,7 +266,7 @@ section { padding: 100px 0; }
   align-items: center;
   width: 100%;
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 /* ─── Hero text ─── */
@@ -892,7 +891,7 @@ section { padding: 100px 0; }
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at top center, rgba(201, 168, 76, 0.05) 0%, transparent 60%);
+  background: radial-gradient(ellipse at top center, rgba(201, 168, 76, 0.07) 0%, transparent 65%);
 }
 
 .privacy-icon {
@@ -943,24 +942,22 @@ section { padding: 100px 0; }
   position: relative;
 }
 
+/* Gold radial glow for CTA section */
 .cta-hex-bg {
   position: absolute;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   width: 700px;
   height: 500px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100'%3E%3Cpath d='M28 66L0 50L0 16L28 0L56 16L56 50L28 66L28 100M56 100L56 66M0 100L0 66' fill='none' stroke='rgba(201%2C168%2C76%2C0.1)' stroke-width='1'/%3E%3C/svg%3E");
-  background-size: 56px 100px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(201, 168, 76, 0.07) 0%, rgba(201, 168, 76, 0.02) 50%, transparent 75%);
   pointer-events: none;
-  opacity: 0;
-  animation: cta-hex-fade 4s ease-in-out infinite;
-  mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 30%, transparent 80%);
-  -webkit-mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 30%, transparent 80%);
+  animation: cta-glow-pulse 4s ease-in-out infinite;
 }
 
-@keyframes cta-hex-fade {
-  0%, 100% { opacity: 0.6; }
-  50%       { opacity: 1; }
+@keyframes cta-glow-pulse {
+  0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+  50%       { opacity: 1;   transform: translate(-50%, -50%) scale(1.06); }
 }
 
 .cta-section .section-eyebrow,
