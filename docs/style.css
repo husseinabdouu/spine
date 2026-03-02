@@ -11,11 +11,11 @@
 }
 
 :root {
-  --bg:           #0a0a0a;
-  --bg-section:   rgba(0, 0, 0, 0);
-  --bg-dark:      rgba(0, 0, 0, 0.42);
-  --bg-card:      #1e1e1e;
-  --bg-card-2:    #252525;
+  --bg:           #040506;
+  --bg-section:   transparent;
+  --bg-dark:      rgba(0, 0, 0, 0.35);
+  --bg-card:      rgba(255, 255, 255, 0.05);
+  --bg-card-2:    rgba(255, 255, 255, 0.07);
   --gold:         #C9A84C;
   --gold-bright:  #DFC06A;
   --gold-deep:    #9A7A28;
@@ -32,8 +32,8 @@
   --text:         #f0f0f0;
   --text-dim:     #888;
   --text-muted:   #505050;
-  --border:       rgba(255, 255, 255, 0.08);
-  --border-card:  rgba(255, 255, 255, 0.07);
+  --border:       rgba(255, 255, 255, 0.1);
+  --border-card:  rgba(255, 255, 255, 0.1);
   --font:         'Inter', system-ui, sans-serif;
   --mono:         'JetBrains Mono', 'Fira Code', monospace;
 }
@@ -41,7 +41,11 @@
 html { scroll-behavior: smooth; }
 
 body {
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255,255,255,0.09), transparent 45%),
+    radial-gradient(circle at 82% 18%, rgba(255,255,255,0.06), transparent 44%),
+    radial-gradient(circle at 60% 80%, rgba(255,255,255,0.05), transparent 55%),
+    linear-gradient(180deg, #040506 0%, #07090a 100%);
   color: var(--text);
   font-family: var(--font);
   font-size: 16px;
@@ -50,21 +54,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-a { color: inherit; text-decoration: none; }
-
-/* ─── Honeycomb canvas ─── */
-#hex-canvas {
+body::before {
+  content: "";
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 0;
+  inset: -20%;
+  opacity: 0.22;
   pointer-events: none;
-  display: block;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='104' viewBox='0 0 120 104'%3E%3Cg fill='none' stroke='%23FFFFFF' stroke-opacity='0.16' stroke-width='1'%3E%3Cpath d='M30 2 L60 19 L60 49 L30 66 L0 49 L0 19 Z'/%3E%3Cpath d='M90 2 L120 19 L120 49 L90 66 L60 49 L60 19 Z'/%3E%3Cpath d='M60 49 L90 66 L90 96 L60 113 L30 96 L30 66 Z'/%3E%3Cpath d='M0 49 L30 66 L30 96 L0 113 L-30 96 L-30 66 Z'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 120px 104px;
+  background-repeat: repeat;
+  transform: rotate(-6deg);
+  z-index: 0;
 }
 
-/* ─── Stacking: all page content above canvas ─── */
+a { color: inherit; text-decoration: none; }
+
+/* ─── Stacking: all page content above ::before honeycomb ─── */
 #navbar,
 section,
 footer {
@@ -422,6 +427,8 @@ section {
   text-align: center;
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   transition: border-color 0.3s, transform 0.3s;
 }
 
@@ -477,6 +484,8 @@ section {
   border-radius: 16px;
   padding: 40px;
   margin-bottom: 24px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .pv-label {
@@ -581,6 +590,8 @@ section {
   padding: 36px 28px;
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
 }
 
@@ -740,6 +751,8 @@ section {
   padding: 36px;
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   transition: border-color 0.4s;
 }
 
@@ -828,6 +841,8 @@ section {
   border: 1px solid var(--border-card);
   border-radius: 14px;
   padding: 28px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
   position: relative;
   overflow: hidden;
@@ -881,6 +896,8 @@ section {
   text-align: center;
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .privacy-card::before {
