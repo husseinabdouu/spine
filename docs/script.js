@@ -1,7 +1,60 @@
 /* ============================================================
    SPINE — Landing Page Script
-   Scroll animations · Score dial · Stat counters · Nav
+   Honeycomb canvas · Scroll animations · Score dial · Nav
    ============================================================ */
+
+/* ─── Honeycomb canvas background ─── */
+(function drawHoneycomb() {
+  const canvas = document.getElementById('hex-canvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+
+  const HEX_R   = 46;      // circumradius (center to vertex)
+  const GAP     = 3;       // gap between cells in px
+  const FILL    = '#1c1c1c';
+  const BG      = '#0a0a0a';
+
+  // Pointy-top hex dimensions
+  const W  = Math.sqrt(3) * HEX_R;   // width of one hex
+  const H  = 2 * HEX_R;              // height of one hex
+  const RH = H * 0.75;               // row height (vertical distance between centers)
+
+  function draw() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cols = Math.ceil(canvas.width  / W)  + 2;
+    const rows = Math.ceil(canvas.height / RH) + 2;
+    const r    = HEX_R - GAP / 2;
+
+    for (let row = -1; row < rows; row++) {
+      for (let col = -1; col < cols; col++) {
+        const offset = (row % 2 !== 0) ? W / 2 : 0;
+        const cx = col * W + offset;
+        const cy = row * RH;
+
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          // Pointy-top: start angle -90° (top vertex)
+          const angle = (Math.PI / 3) * i - Math.PI / 2;
+          const x = cx + r * Math.cos(angle);
+          const y = cy + r * Math.sin(angle);
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = FILL;
+        ctx.fill();
+      }
+    }
+  }
+
+  draw();
+  window.addEventListener('resize', draw, { passive: true });
+})();
 
 /* ─── Scroll reveal ─── */
 const revealObserver = new IntersectionObserver(
