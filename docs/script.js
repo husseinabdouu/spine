@@ -59,11 +59,11 @@ if (statsGrid) statObserver.observe(statsGrid);
 const navbar = document.getElementById('navbar');
 window.addEventListener('scroll', () => {
   if (window.scrollY > 60) {
-    navbar.style.background = 'rgba(7, 7, 16, 0.92)';
-    navbar.style.borderBottomColor = 'rgba(0, 212, 255, 0.2)';
+    navbar.style.background = 'rgba(8, 8, 8, 0.96)';
+    navbar.style.borderBottomColor = 'rgba(201, 168, 76, 0.2)';
   } else {
-    navbar.style.background = 'rgba(7, 7, 16, 0.72)';
-    navbar.style.borderBottomColor = 'rgba(0, 212, 255, 0.12)';
+    navbar.style.background = 'rgba(8, 8, 8, 0.8)';
+    navbar.style.borderBottomColor = 'rgba(255, 255, 255, 0.07)';
   }
 }, { passive: true });
 
@@ -215,32 +215,98 @@ window.addEventListener('scroll', () => {
   });
 })();
 
-/* ─── Reactor tick marks ─── */
-(function buildTickMarks() {
-  const g = document.querySelector('.tick-marks');
-  if (!g) return;
+/* ─── Hero Honeycomb Visual ─── */
+(function buildHexVisual() {
+  const svg = document.getElementById('hex-svg');
+  if (!svg) return;
 
-  const cx = 150, cy = 150, r = 140;
-  const count = 48;
+  const NS   = 'http://www.w3.org/2000/svg';
+  const CX   = 160, CY = 160, SIZE = 29;
 
-  for (let i = 0; i < count; i++) {
-    const angle = (i / count) * 2 * Math.PI - Math.PI / 2;
-    const major = i % 6 === 0;
-    const len   = major ? 12 : 6;
-    const x1 = cx + r * Math.cos(angle);
-    const y1 = cy + r * Math.sin(angle);
-    const x2 = cx + (r - len) * Math.cos(angle);
-    const y2 = cy + (r - len) * Math.sin(angle);
+  // Flat-top hex: dx = SIZE * 1.5, dy = SIZE * sqrt(3)
+  const DX = SIZE * 1.5;
+  const DY = SIZE * Math.sqrt(3);
 
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    line.setAttribute('x1', x1);
-    line.setAttribute('y1', y1);
-    line.setAttribute('x2', x2);
-    line.setAttribute('y2', y2);
-    line.setAttribute('stroke', major ? 'rgba(0,212,255,0.5)' : 'rgba(0,212,255,0.2)');
-    line.setAttribute('stroke-width', major ? '1.5' : '0.8');
-    g.appendChild(line);
+  function hexCenter(q, r) {
+    return [CX + DX * q, CY + DY * (r + q / 2)];
   }
+
+  function hexPath(x, y, s) {
+    const pts = [];
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 180) * (60 * i);
+      pts.push([x + s * Math.cos(a), y + s * Math.sin(a)]);
+    }
+    return 'M ' + pts.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' L ') + ' Z';
+  }
+
+  const cells = [
+    // Center
+    { q:  0, r:  0, ring: 0, label: null },
+    // Ring 1
+    { q:  1, r:  0, ring: 1, label: 'HRV' },
+    { q:  0, r:  1, ring: 1, label: 'SLEEP' },
+    { q: -1, r:  1, ring: 1, label: null },
+    { q: -1, r:  0, ring: 1, label: 'SPEND' },
+    { q:  0, r: -1, ring: 1, label: 'RISK' },
+    { q:  1, r: -1, ring: 1, label: null },
+    // Ring 2
+    { q:  2, r:  0, ring: 2, label: null },
+    { q:  1, r:  1, ring: 2, label: null },
+    { q:  0, r:  2, ring: 2, label: null },
+    { q: -1, r:  2, ring: 2, label: null },
+    { q: -2, r:  2, ring: 2, label: null },
+    { q: -2, r:  1, ring: 2, label: null },
+    { q: -2, r:  0, ring: 2, label: null },
+    { q: -1, r: -1, ring: 2, label: null },
+    { q:  0, r: -2, ring: 2, label: null },
+    { q:  1, r: -2, ring: 2, label: null },
+    { q:  2, r: -2, ring: 2, label: null },
+    { q:  2, r: -1, ring: 2, label: null },
+  ];
+
+  const styles = {
+    0: { fill: 'rgba(201,168,76,0.14)', stroke: 'rgba(201,168,76,0.9)',  sw: 1.5 },
+    1: { fill: 'rgba(201,168,76,0.05)', stroke: 'rgba(201,168,76,0.45)', sw: 1.0 },
+    2: { fill: 'rgba(201,168,76,0.02)', stroke: 'rgba(201,168,76,0.16)', sw: 0.7 },
+  };
+
+  cells.forEach(cell => {
+    const [x, y] = hexCenter(cell.q, cell.r);
+    const s      = styles[cell.ring];
+    const inner  = SIZE - 2.5;
+
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', hexPath(x, y, inner));
+    path.setAttribute('fill', s.fill);
+    path.setAttribute('stroke', s.stroke);
+    path.setAttribute('stroke-width', s.sw);
+    if (cell.ring === 0) path.classList.add('hex-center-anim');
+    svg.appendChild(path);
+
+    if (cell.label) {
+      const text = document.createElementNS(NS, 'text');
+      text.setAttribute('x', x);
+      text.setAttribute('y', y + 1);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.setAttribute('fill', 'rgba(201,168,76,0.55)');
+      text.setAttribute('font-size', '7');
+      text.setAttribute('font-family', 'JetBrains Mono, monospace');
+      text.setAttribute('letter-spacing', '0.12em');
+      text.textContent = cell.label;
+      svg.appendChild(text);
+    }
+  });
+
+  // Center pulse dot
+  const dot = document.createElementNS(NS, 'circle');
+  dot.setAttribute('cx', CX);
+  dot.setAttribute('cy', CY);
+  dot.setAttribute('r', 4);
+  dot.setAttribute('fill', '#C9A84C');
+  dot.classList.add('hex-core-dot');
+  svg.appendChild(dot);
 })();
 
 /* ─── Spending bar animation on scroll ─── */
