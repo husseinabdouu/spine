@@ -229,99 +229,10 @@ window.addEventListener('scroll', () => {
   });
 })();
 
-/* ─── Hero Honeycomb Visual ─── */
-(function buildHexVisual() {
-  const svg = document.getElementById('hex-svg');
-  if (!svg) return;
-
-  const NS   = 'http://www.w3.org/2000/svg';
-  const CX   = 160, CY = 160, SIZE = 29;
-
-  // Flat-top hex: dx = SIZE * 1.5, dy = SIZE * sqrt(3)
-  const DX = SIZE * 1.5;
-  const DY = SIZE * Math.sqrt(3);
-
-  function hexCenter(q, r) {
-    return [CX + DX * q, CY + DY * (r + q / 2)];
-  }
-
-  function hexPath(x, y, s) {
-    const pts = [];
-    for (let i = 0; i < 6; i++) {
-      const a = (Math.PI / 180) * (60 * i);
-      pts.push([x + s * Math.cos(a), y + s * Math.sin(a)]);
-    }
-    return 'M ' + pts.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' L ') + ' Z';
-  }
-
-  const cells = [
-    // Center
-    { q:  0, r:  0, ring: 0, label: null },
-    // Ring 1
-    { q:  1, r:  0, ring: 1, label: 'HRV' },
-    { q:  0, r:  1, ring: 1, label: 'SLEEP' },
-    { q: -1, r:  1, ring: 1, label: null },
-    { q: -1, r:  0, ring: 1, label: 'SPEND' },
-    { q:  0, r: -1, ring: 1, label: 'RISK' },
-    { q:  1, r: -1, ring: 1, label: null },
-    // Ring 2
-    { q:  2, r:  0, ring: 2, label: null },
-    { q:  1, r:  1, ring: 2, label: null },
-    { q:  0, r:  2, ring: 2, label: null },
-    { q: -1, r:  2, ring: 2, label: null },
-    { q: -2, r:  2, ring: 2, label: null },
-    { q: -2, r:  1, ring: 2, label: null },
-    { q: -2, r:  0, ring: 2, label: null },
-    { q: -1, r: -1, ring: 2, label: null },
-    { q:  0, r: -2, ring: 2, label: null },
-    { q:  1, r: -2, ring: 2, label: null },
-    { q:  2, r: -2, ring: 2, label: null },
-    { q:  2, r: -1, ring: 2, label: null },
-  ];
-
-  const styles = {
-    0: { fill: 'rgba(255,255,255,0.08)', stroke: 'rgba(255,255,255,0.75)', sw: 1.5 },
-    1: { fill: 'rgba(255,255,255,0.03)', stroke: 'rgba(255,255,255,0.3)',  sw: 1.0 },
-    2: { fill: 'rgba(255,255,255,0.01)', stroke: 'rgba(255,255,255,0.1)',  sw: 0.7 },
-  };
-
-  cells.forEach(cell => {
-    const [x, y] = hexCenter(cell.q, cell.r);
-    const s      = styles[cell.ring];
-    const inner  = SIZE - 2.5;
-
-    const path = document.createElementNS(NS, 'path');
-    path.setAttribute('d', hexPath(x, y, inner));
-    path.setAttribute('fill', s.fill);
-    path.setAttribute('stroke', s.stroke);
-    path.setAttribute('stroke-width', s.sw);
-    if (cell.ring === 0) path.classList.add('hex-center-anim');
-    svg.appendChild(path);
-
-    if (cell.label) {
-      const text = document.createElementNS(NS, 'text');
-      text.setAttribute('x', x);
-      text.setAttribute('y', y + 1);
-      text.setAttribute('text-anchor', 'middle');
-      text.setAttribute('dominant-baseline', 'middle');
-      text.setAttribute('fill', 'rgba(255,255,255,0.45)');
-      text.setAttribute('font-size', '7');
-      text.setAttribute('font-family', 'JetBrains Mono, monospace');
-      text.setAttribute('letter-spacing', '0.12em');
-      text.textContent = cell.label;
-      svg.appendChild(text);
-    }
-  });
-
-  // Center pulse dot
-  const dot = document.createElementNS(NS, 'circle');
-  dot.setAttribute('cx', CX);
-  dot.setAttribute('cy', CY);
-  dot.setAttribute('r', 4);
-  dot.setAttribute('fill', 'rgba(255,255,255,0.8)');
-  dot.classList.add('hex-core-dot');
-  svg.appendChild(dot);
-})();
+/* ─── Init Lucide icons ─── */
+if (typeof lucide !== 'undefined') {
+  lucide.createIcons();
+}
 
 /* ─── Spending bar animation on scroll ─── */
 (function animateBars() {

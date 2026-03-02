@@ -11,13 +11,16 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <!-- Honeycomb background — fixed position, animated via JS background-position -->
+    <!-- Honeycomb background — fixed, parallax via JS -->
     <div id="hex-bg" aria-hidden="true"></div>
 
     <!-- NAV -->
     <nav id="navbar">
       <div class="nav-inner">
-        <a href="#" class="nav-logo">SPINE</a>
+        <a href="#" class="nav-logo">
+          <img src="spine-logo.png" alt="Spine" class="nav-logo-img" />
+          <span>SPINE</span>
+        </a>
         <div class="nav-links">
           <a href="#how-it-works">How It Works</a>
           <a href="#features">Features</a>
@@ -45,22 +48,22 @@
             Connect your body. Connect your bank. Understand the pattern.
           </p>
           <div class="hero-ctas">
-            <a href="#early-access" class="btn-primary btn-glow">Get Early Access</a>
+            <a href="#early-access" class="btn-primary">Get Early Access</a>
             <a href="#how-it-works" class="btn-ghost">See How It Works →</a>
           </div>
           <div class="hero-chips">
-            <div class="chip chip-danger">💤 4.8 hrs sleep → High Risk Day</div>
-            <div class="chip chip-warning">❤️ HRV 42ms → Moderate Risk</div>
-            <div class="chip chip-safe">⚡ 890 cal active → Low Risk Day</div>
+            <div class="chip chip-danger"><i data-lucide="moon"></i> 4.8 hrs sleep → High Risk Day</div>
+            <div class="chip chip-warning"><i data-lucide="activity"></i> HRV 42ms → Moderate Risk</div>
+            <div class="chip chip-safe"><i data-lucide="zap"></i> 890 cal active → Low Risk Day</div>
           </div>
         </div>
 
-        <div class="hero-hex-visual">
-          <svg id="hex-svg" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg"></svg>
-          <div class="hex-glow"></div>
+        <!-- Logo visual — replaces hex cluster -->
+        <div class="hero-logo-visual">
+          <div class="hero-logo-glow"></div>
+          <img src="spine-logo.png" alt="Spine" class="hero-logo-hero-img" />
         </div>
       </div>
-
     </section>
 
     <!-- THE PROBLEM -->
@@ -96,21 +99,21 @@
             <div class="pv-label">Low-energy day</div>
             <div class="pv-metrics">
               <div class="pv-metric bad">
-                <span class="pv-icon">💤</span>
+                <span class="pv-icon"><i data-lucide="moon"></i></span>
                 <div>
                   <div class="pv-metric-val">4.8 hrs</div>
                   <div class="pv-metric-name">Sleep</div>
                 </div>
               </div>
               <div class="pv-metric bad">
-                <span class="pv-icon">❤️</span>
+                <span class="pv-icon"><i data-lucide="activity"></i></span>
                 <div>
                   <div class="pv-metric-val">38 ms</div>
                   <div class="pv-metric-name">HRV</div>
                 </div>
               </div>
               <div class="pv-metric bad">
-                <span class="pv-icon">⚡</span>
+                <span class="pv-icon"><i data-lucide="zap"></i></span>
                 <div>
                   <div class="pv-metric-val">240 cal</div>
                   <div class="pv-metric-name">Activity</div>
@@ -132,21 +135,21 @@
             <div class="pv-label">High-energy day</div>
             <div class="pv-metrics">
               <div class="pv-metric good">
-                <span class="pv-icon">💤</span>
+                <span class="pv-icon"><i data-lucide="moon"></i></span>
                 <div>
                   <div class="pv-metric-val">8.2 hrs</div>
                   <div class="pv-metric-name">Sleep</div>
                 </div>
               </div>
               <div class="pv-metric good">
-                <span class="pv-icon">❤️</span>
+                <span class="pv-icon"><i data-lucide="activity"></i></span>
                 <div>
                   <div class="pv-metric-val">72 ms</div>
                   <div class="pv-metric-name">HRV</div>
                 </div>
               </div>
               <div class="pv-metric good">
-                <span class="pv-icon">⚡</span>
+                <span class="pv-icon"><i data-lucide="zap"></i></span>
                 <div>
                   <div class="pv-metric-val">1,240 cal</div>
                   <div class="pv-metric-name">Activity</div>
@@ -180,7 +183,7 @@
         <div class="steps-grid">
           <div class="step-card reveal">
             <div class="step-number">01</div>
-            <div class="step-icon">🏦</div>
+            <div class="step-icon"><i data-lucide="landmark"></i></div>
             <h3>Connect Your Bank</h3>
             <p>
               Link your accounts via Plaid — the same technology used by thousands of
@@ -192,7 +195,7 @@
 
           <div class="step-card reveal">
             <div class="step-number">02</div>
-            <div class="step-icon">🍎</div>
+            <div class="step-icon"><i data-lucide="heart-pulse"></i></div>
             <h3>Sync Your Body</h3>
             <p>
               Run a simple iOS Shortcut that pulls your Apple Health data —
@@ -204,7 +207,7 @@
 
           <div class="step-card reveal">
             <div class="step-number">03</div>
-            <div class="step-icon">🧠</div>
+            <div class="step-icon"><i data-lucide="sparkles"></i></div>
             <h3>Get Your Score</h3>
             <p>
               Backbone — Spine's multi-model AI engine — cross-references your health
@@ -229,7 +232,6 @@
         <div class="score-layout reveal">
           <div class="score-dial-wrapper">
             <svg class="score-svg" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
-              <!-- Track -->
               <circle
                 id="score-track"
                 cx="110" cy="110" r="90"
@@ -240,7 +242,6 @@
                 stroke-linecap="round"
                 transform="rotate(135 110 110)"
               />
-              <!-- Value arc -->
               <circle
                 id="score-arc"
                 cx="110" cy="110" r="90"
@@ -251,7 +252,6 @@
                 stroke-linecap="round"
                 transform="rotate(135 110 110)"
               />
-              <!-- Center text -->
               <text id="score-number" x="110" y="104" class="score-num-text">72</text>
               <text id="score-level" x="110" y="128" class="score-level-text">HIGH RISK</text>
             </svg>
@@ -263,7 +263,9 @@
           </div>
 
           <div class="score-insights">
-            <div id="score-status-badge" class="score-badge badge-danger">⚠ HIGH RISK</div>
+            <div id="score-status-badge" class="score-badge badge-danger">
+              <i data-lucide="triangle-alert"></i> HIGH RISK
+            </div>
             <h3 id="score-insight-title">Defer non-essential spending today.</h3>
             <ul id="score-insight-list" class="insight-list">
               <li>Your HRV is 31% below your 7-day baseline — impulse control is reduced</li>
@@ -273,15 +275,15 @@
             </ul>
             <div class="score-health-summary">
               <div class="shs-item">
-                <span class="shs-icon">💤</span>
+                <span class="shs-icon"><i data-lucide="moon"></i></span>
                 <span id="shs-sleep">4.8 hrs sleep</span>
               </div>
               <div class="shs-item">
-                <span class="shs-icon">❤️</span>
+                <span class="shs-icon"><i data-lucide="activity"></i></span>
                 <span id="shs-hrv">38 ms HRV</span>
               </div>
               <div class="shs-item">
-                <span class="shs-icon">⚡</span>
+                <span class="shs-icon"><i data-lucide="zap"></i></span>
                 <span id="shs-energy">240 cal active</span>
               </div>
             </div>
@@ -298,32 +300,32 @@
 
         <div class="features-grid">
           <div class="feature-card reveal">
-            <div class="feature-icon">🏦</div>
+            <div class="feature-icon"><i data-lucide="landmark"></i></div>
             <h3>Plaid Integration</h3>
             <p>Connect any major bank or credit card. Transactions sync automatically — no manual logging, ever.</p>
           </div>
           <div class="feature-card reveal">
-            <div class="feature-icon">⌚</div>
+            <div class="feature-icon"><i data-lucide="watch"></i></div>
             <h3>Wearable Sync</h3>
             <p>Connect your wearable — sleep, HRV, and activity data pulled automatically to build your health baseline.</p>
           </div>
           <div class="feature-card reveal">
-            <div class="feature-icon">🧠</div>
+            <div class="feature-icon"><i data-lucide="sparkles"></i></div>
             <h3>Backbone AI</h3>
             <p>Not just charts — plain-English behavioral insights from Backbone, Spine's multi-model AI engine, that actually explain your patterns.</p>
           </div>
           <div class="feature-card reveal">
-            <div class="feature-icon">📊</div>
+            <div class="feature-icon"><i data-lucide="bar-chart-2"></i></div>
             <h3>Spending Trends</h3>
             <p>Weekly and monthly spending visualized alongside your health metrics. See the correlation in real time.</p>
           </div>
           <div class="feature-card reveal">
-            <div class="feature-icon">⚡</div>
+            <div class="feature-icon"><i data-lucide="zap"></i></div>
             <h3>Daily Risk Score</h3>
             <p>Every morning, your Behavioral Risk Score updates. Know before you open your wallet what kind of day it is.</p>
           </div>
           <div class="feature-card reveal">
-            <div class="feature-icon">🔒</div>
+            <div class="feature-icon"><i data-lucide="shield-check"></i></div>
             <h3>Privacy First</h3>
             <p>Row-level security via Supabase. Your data is yours. We never sell it, share it, or train models on it.</p>
           </div>
@@ -335,7 +337,7 @@
     <section id="privacy">
       <div class="container">
         <div class="privacy-card reveal">
-          <div class="privacy-icon">🛡</div>
+          <div class="privacy-icon"><i data-lucide="shield"></i></div>
           <h2>Your data. Your vault.</h2>
           <p>
             Spine handles two of the most sensitive data types that exist — your finances and your body.
@@ -368,11 +370,9 @@
               class="email-input"
               required
             />
-            <button type="submit" class="btn-primary btn-glow">Notify Me</button>
+            <button type="submit" class="btn-primary">Notify Me</button>
           </form>
-          <p id="form-success" class="form-success hidden">
-            ✓ You're on the list. We'll be in touch.
-          </p>
+          <p id="form-success" class="form-success hidden">✓ You're on the list. We'll be in touch.</p>
           <p class="cta-note">Built for people who sleep too little and spend too much.</p>
         </div>
       </div>
@@ -381,7 +381,10 @@
     <!-- FOOTER -->
     <footer>
       <div class="container footer-inner">
-        <div class="footer-logo">SPINE</div>
+        <div class="footer-logo">
+          <img src="spine-logo.png" alt="Spine" class="footer-logo-img" />
+          <span>SPINE</span>
+        </div>
         <div class="footer-links">
           <a href="/spine/privacy">Privacy Policy</a>
           <a href="/spine/security-policy">Security Policy</a>
@@ -391,6 +394,8 @@
       </div>
     </footer>
 
+    <!-- Lucide icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script src="script.js"></script>
   </body>
 </html>
