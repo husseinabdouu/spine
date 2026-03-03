@@ -472,9 +472,9 @@ section {
   font-weight: 600;
 }
 
-.sv-good { fill: #4ade80; }
-.sv-warn { fill: #fbbf24; }
-.sv-bad  { fill: #f87171; }
+.sv-good { fill: #7ec49a; }
+.sv-warn { fill: #C9A84C; }
+.sv-bad  { fill: #c47f7f; }
 
 /* ============================================================
    THE PROBLEM
