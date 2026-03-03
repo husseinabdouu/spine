@@ -472,9 +472,9 @@ section {
   font-weight: 600;
 }
 
-.sv-good { fill: #4ade80; }
-.sv-warn { fill: #fbbf24; }
-.sv-bad  { fill: #f87171; }
+.sv-good { fill: #7ec49a; }   /* sage green  — calm, not aggressive */
+.sv-warn { fill: #C9A84C; }   /* brand gold  — ties into the honeycomb */
+.sv-bad  { fill: #c47f7f; }   /* dusty rose  — readable, not alarming */
 
 /* ============================================================
    THE PROBLEM

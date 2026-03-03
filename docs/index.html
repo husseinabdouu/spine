@@ -77,49 +77,52 @@
             <line x1="70" y1="38" x2="70" y2="320"
               stroke="rgba(255,255,255,0.07)" stroke-width="1.5" stroke-dasharray="3 6"/>
 
-            <!-- V1 — cervical crown, no label -->
+            <!-- V1 — cervical crown — RECOVERY -->
             <circle cx="70" cy="28" r="10" fill="white">
-              <animate attributeName="opacity" values="0.75;1;0.75" dur="5s" begin="0s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.8;1;0.8" dur="5s" begin="0s" repeatCount="indefinite"/>
             </circle>
+            <line x1="84"  y1="28"  x2="118" y2="28"  stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="22"  class="sv-label">RECOVERY</text>
+            <text x="122" y="36"  class="sv-value sv-bad">43%</text>
 
             <!-- V2 — large circle — SLEEP -->
             <circle cx="70" cy="95" r="30" fill="white">
-              <animate attributeName="opacity" values="0.9;1;0.9" dur="5s" begin="0.6s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="0.6s" repeatCount="indefinite"/>
             </circle>
-            <line x1="104" y1="95" x2="118" y2="95" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+            <line x1="104" y1="95" x2="118" y2="95" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
             <text x="122" y="88"  class="sv-label">SLEEP</text>
             <text x="122" y="104" class="sv-value sv-bad">4.8 hrs</text>
 
-            <!-- V3 — tilted ellipse — HRV (matches actual logo geometry) -->
+            <!-- V3 — tilted ellipse — HRV -->
             <ellipse cx="70" cy="170" rx="40" ry="27" fill="white" transform="rotate(15,70,170)">
-              <animate attributeName="opacity" values="0.9;1;0.9" dur="5s" begin="1.2s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="1.2s" repeatCount="indefinite"/>
             </ellipse>
-            <line x1="109" y1="170" x2="118" y2="170" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+            <line x1="109" y1="170" x2="118" y2="170" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
             <text x="122" y="163" class="sv-label">HRV</text>
             <text x="122" y="179" class="sv-value sv-warn">42 ms</text>
 
             <!-- V4 — medium circle — ACTIVITY -->
             <circle cx="70" cy="234" r="22" fill="white">
-              <animate attributeName="opacity" values="0.9;1;0.9" dur="5s" begin="1.8s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="1.8s" repeatCount="indefinite"/>
             </circle>
-            <line x1="96"  y1="234" x2="118" y2="234" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+            <line x1="96"  y1="234" x2="118" y2="234" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
             <text x="122" y="227" class="sv-label">ACTIVITY</text>
             <text x="122" y="244" class="sv-value sv-good">890 cal</text>
 
             <!-- V5 — small circle — STRESS -->
             <circle cx="70" cy="291" r="15" fill="white">
-              <animate attributeName="opacity" values="0.9;1;0.9" dur="5s" begin="2.4s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="2.4s" repeatCount="indefinite"/>
             </circle>
-            <line x1="89"  y1="291" x2="118" y2="291" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+            <line x1="89"  y1="291" x2="118" y2="291" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
             <text x="122" y="284" class="sv-label">STRESS</text>
             <text x="122" y="300" class="sv-value sv-bad">HIGH</text>
 
-            <!-- V6 — tailbone — RISK -->
+            <!-- V6 — tailbone — RISK SCORE -->
             <circle cx="70" cy="333" r="10" fill="white">
-              <animate attributeName="opacity" values="0.75;1;0.75" dur="5s" begin="3s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.8;1;0.8" dur="5s" begin="3s" repeatCount="indefinite"/>
             </circle>
-            <line x1="84"  y1="333" x2="118" y2="333" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-            <text x="122" y="326" class="sv-label">RISK</text>
+            <line x1="84"  y1="333" x2="118" y2="333" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="326" class="sv-label">RISK SCORE</text>
             <text x="122" y="342" class="sv-value sv-bad">72 / 100</text>
 
           </svg>
