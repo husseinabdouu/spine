@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data Policy — Spine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #060708;
+      color: rgba(255,255,255,0.82);
+      font-family: 'Space Grotesk', system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      padding: 80px 24px;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    .back {
+      display: inline-flex; align-items: center; gap: 8px;
+      color: rgba(255,255,255,0.4); text-decoration: none;
+      font-size: 14px; letter-spacing: 0.05em; margin-bottom: 56px;
+      transition: color 0.2s;
+    }
+    .back:hover { color: rgba(255,255,255,0.8); }
+    h1 {
+      font-size: clamp(28px, 5vw, 40px); font-weight: 700;
+      letter-spacing: -0.02em; margin-bottom: 8px;
+    }
+    .subtitle { color: rgba(255,255,255,0.35); font-size: 14px; margin-bottom: 56px; }
+    h2 { font-size: 18px; font-weight: 600; margin: 40px 0 12px; color: rgba(255,255,255,0.9); }
+    p { color: rgba(255,255,255,0.6); margin-bottom: 16px; }
+    ul { color: rgba(255,255,255,0.6); padding-left: 20px; margin-bottom: 16px; }
+    li { margin-bottom: 8px; }
+    .notice {
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px; padding: 20px 24px;
+      background: rgba(255,255,255,0.03);
+      color: rgba(255,255,255,0.45); font-size: 14px;
+      margin-top: 56px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a href="/spine/" class="back">← Back to Spine</a>
+    <h1>Data Policy</h1>
+    <p class="subtitle">Last updated: March 2026 · This page is a placeholder — full policy coming soon.</p>
+
+    <h2>Data we collect</h2>
+    <ul>
+      <li><strong>Biometric data:</strong> HRV, sleep duration/quality, activity, resting heart rate, stress indicators — sourced from Apple Health.</li>
+      <li><strong>Financial data:</strong> Transaction history, spending categories, account balances — sourced read-only via Plaid.</li>
+      <li><strong>Account data:</strong> Email address and authentication credentials.</li>
+    </ul>
+
+    <h2>Data we do not collect</h2>
+    <ul>
+      <li>Your banking login credentials (handled entirely by Plaid)</li>
+      <li>Any data beyond what is necessary to compute your Spine Score</li>
+      <li>Behavioural analytics or advertising identifiers</li>
+    </ul>
+
+    <h2>Data retention</h2>
+    <p>Your data is retained for as long as your account is active. Upon account deletion, all personal data is purged within 30 days. Anonymised, aggregated trend data may be retained for product improvement.</p>
+
+    <h2>Data sharing</h2>
+    <p>We do not sell, rent, or share your personal data with any third party for marketing or advertising purposes. Data is shared only with infrastructure providers (Supabase, Plaid) strictly for service operation.</p>
+
+    <h2>Your controls</h2>
+    <p>You may export or delete your data at any time from within the app. For questions, contact <a href="mailto:data@joinspine.io" style="color:rgba(255,255,255,0.7)">data@joinspine.io</a>.</p>
+
+    <div class="notice">This is a pre-launch placeholder. A full, legally reviewed Data Policy will be published before Spine's public release.</div>
+  </div>
+</body>
+</html>
