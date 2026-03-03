@@ -412,6 +412,9 @@ section {
   flex-direction: column;
   gap: 10px;
 }
+.hero-chips .chip {
+  width: 100%;
+}
 
 .chip {
   display: inline-flex;
