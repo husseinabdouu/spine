@@ -72,57 +72,57 @@
         <div class="hero-spine-visual" aria-hidden="true">
           <svg class="spine-metric-svg" viewBox="0 0 280 365" xmlns="http://www.w3.org/2000/svg">
 
-            <!-- Connector: V1 bottom (52) → V6 top (323) -->
-            <line x1="62" y1="52" x2="62" y2="323"
+            <!-- Intervertebral connector -->
+            <line x1="70" y1="38" x2="70" y2="320"
               stroke="rgba(255,255,255,0.28)" stroke-width="1.5" stroke-dasharray="4 7"/>
 
-            <!-- V1 r=14 | bottom=52 → gap 21 → V2 top=73 -->
-            <circle cx="62" cy="38" r="14" fill="white">
+            <!-- V1 — cervical crown — RECOVERY -->
+            <circle cx="70" cy="28" r="10" fill="white">
               <animate attributeName="opacity" values="0.8;1;0.8" dur="5s" begin="0s" repeatCount="indefinite"/>
             </circle>
-            <line x1="80"  y1="38"  x2="118" y2="38"  stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-            <text x="122" y="32"  class="sv-label">RECOVERY</text>
-            <text x="122" y="46"  class="sv-value sv-good">91%</text>
+            <line x1="84"  y1="28"  x2="118" y2="28"  stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="22"  class="sv-label">RECOVERY</text>
+            <text x="122" y="36"  class="sv-value sv-good">91%</text>
 
-            <!-- V2 r=39 | bottom=151 → gap ~2 → V3 eff-top≈154 -->
-            <circle cx="62" cy="112" r="39" fill="white">
+            <!-- V2 — large circle — SLEEP -->
+            <circle cx="70" cy="95" r="30" fill="white">
               <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="0.6s" repeatCount="indefinite"/>
             </circle>
-            <line x1="105" y1="112" x2="118" y2="112" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-            <text x="122" y="106" class="sv-label">SLEEP</text>
-            <text x="122" y="120" class="sv-value sv-good">8.2 hrs</text>
+            <line x1="104" y1="95" x2="118" y2="95" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="88"  class="sv-label">SLEEP</text>
+            <text x="122" y="104" class="sv-value sv-good">8.2 hrs</text>
 
-            <!-- V3 rx=46 ry=21 rot=15 | eff-top≈154 (nearly touches V2), eff-bottom≈201 → gap 11 → V4 top=212 -->
-            <ellipse cx="62" cy="177" rx="46" ry="21" fill="white" transform="rotate(15,62,177)">
+            <!-- V3 — tilted ellipse — HRV -->
+            <ellipse cx="70" cy="170" rx="40" ry="27" fill="white" transform="rotate(15,70,170)">
               <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="1.2s" repeatCount="indefinite"/>
             </ellipse>
-            <line x1="111" y1="177" x2="118" y2="177" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-            <text x="122" y="171" class="sv-label">HRV</text>
-            <text x="122" y="185" class="sv-value sv-good">72 ms</text>
+            <line x1="109" y1="170" x2="118" y2="170" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="163" class="sv-label">HRV</text>
+            <text x="122" y="179" class="sv-value sv-good">72 ms</text>
 
-            <!-- V4 r=27 | top=212, gap=11. bottom=266 → gap 13 → V5 top=279 -->
-            <circle cx="62" cy="239" r="27" fill="white">
+            <!-- V4 — medium circle — ACTIVITY -->
+            <circle cx="70" cy="234" r="22" fill="white">
               <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="1.8s" repeatCount="indefinite"/>
             </circle>
-            <line x1="93"  y1="239" x2="118" y2="239" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-            <text x="122" y="233" class="sv-label">ACTIVITY</text>
-            <text x="122" y="247" class="sv-value sv-good">1,240 cal</text>
+            <line x1="96"  y1="234" x2="118" y2="234" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="227" class="sv-label">ACTIVITY</text>
+            <text x="122" y="244" class="sv-value sv-good">1,240 cal</text>
 
-            <!-- V5 r=15 | top=279, gap=13. bottom=309 → gap 14 → V6 top=323 -->
-            <circle cx="62" cy="294" r="15" fill="white">
+            <!-- V5 — small circle — STRESS -->
+            <circle cx="70" cy="291" r="15" fill="white">
               <animate attributeName="opacity" values="0.85;1;0.85" dur="5s" begin="2.4s" repeatCount="indefinite"/>
             </circle>
-            <line x1="81"  y1="294" x2="118" y2="294" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-            <text x="122" y="288" class="sv-label">STRESS</text>
-            <text x="122" y="302" class="sv-value sv-good">LOW</text>
+            <line x1="89"  y1="291" x2="118" y2="291" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="284" class="sv-label">STRESS</text>
+            <text x="122" y="300" class="sv-value sv-good">LOW</text>
 
-            <!-- V6 r=10 | top=323, gap=14 -->
-            <circle cx="62" cy="333" r="10" fill="white">
+            <!-- V6 — tailbone — RISK SCORE -->
+            <circle cx="70" cy="333" r="10" fill="white">
               <animate attributeName="opacity" values="0.8;1;0.8" dur="5s" begin="3s" repeatCount="indefinite"/>
             </circle>
-            <line x1="76"  y1="333" x2="118" y2="333" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-            <text x="122" y="327" class="sv-label">RISK SCORE</text>
-            <text x="122" y="341" class="sv-value sv-good">18 / 100</text>
+            <line x1="84"  y1="333" x2="118" y2="333" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="122" y="326" class="sv-label">RISK SCORE</text>
+            <text x="122" y="342" class="sv-value sv-good">18 / 100</text>
 
           </svg>
         </div>
