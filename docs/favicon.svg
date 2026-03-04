@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#060708"/>
+  <!-- V1 small dot -->
+  <circle cx="16" cy="3.5" r="1.8" fill="white"/>
+  <!-- V2 large circle -->
+  <circle cx="16" cy="10.5" r="5.2" fill="white"/>
+  <!-- V3 tilted ellipse -->
+  <ellipse cx="16" cy="18" rx="7" ry="4.5" fill="white" transform="rotate(15,16,18)"/>
+  <!-- V4 medium circle -->
+  <circle cx="16" cy="24.5" r="3.5" fill="white"/>
+  <!-- V5 small circle -->
+  <circle cx="16" cy="29.2" r="2" fill="white"/>
+</svg>
