@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/whoop-sync",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/plaid-sync",
+      "schedule": "0 9 * * *"
     }
   ]
 }
