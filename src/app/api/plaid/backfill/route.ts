@@ -1,28 +1,32 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { plaidClient } from '@/lib/plaid/client';
-import { backfillTransactions } from '@/lib/plaid/backfill';
-import { mapPlaidCategory } from '@/lib/categorize';
-import { format } from 'date-fns';
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { plaidClient } from "@/lib/plaid/client";
+import { mapPlaidCategory } from "@/lib/categorize";
+import { format, subMonths, startOfMonth, endOfMonth, parseISO } from "date-fns";
+
+export const maxDuration = 60;
+
+const WEBHOOK_URL = "https://spine-one.vercel.app/api/plaid/webhook";
 
 /**
  * POST /api/plaid/backfill
  *
- * Two-phase backfill:
- *   1. Calls Plaid /transactions/refresh to force a fresh pull from the bank.
- *      This fixes the "phase 1 only" problem where Plaid only returns 30-90 days
- *      on initial connect. After refresh, Plaid fetches the full 24-month history.
- *   2. Resets the sync cursor and runs a full transactionsSync from the beginning,
- *      picking up everything Plaid now has.
- *   3. Optionally also runs transactionsGet over the explicit date range as a second
- *      pass to catch anything the sync might miss.
+ * Deep, multi-phase backfill designed to get every transaction from Plaid:
  *
- * Safe to run multiple times — upserts on plaid_transaction_id, no duplicates.
+ * Phase 1 — Register webhook (so future changes auto-sync)
+ * Phase 2 — Call transactionsRefresh + wait 30s (forces Plaid to re-pull from bank)
+ * Phase 3 — Month-by-month transactionsGet (Sept 2025 → today)
+ *            Each month is a separate Plaid call → we can see exactly which months
+ *            have missing data and guarantee we don't miss any page.
+ * Phase 4 — Full transactionsSync from null cursor to capture anything transactionsGet missed
+ *
+ * All upserts use onConflict: plaid_transaction_id — safe to run multiple times.
  *
  * Body:
  *   user_id    string  (required)
- *   start_date string  YYYY-MM-DD (optional, defaults to 2024-09-01)
- *   end_date   string  YYYY-MM-DD (optional, defaults to today)
+ *   start_date string  YYYY-MM-DD  (optional, defaults to 18 months ago)
+ *   end_date   string  YYYY-MM-DD  (optional, defaults to today)
+ *   purge      boolean (optional, default false) — delete all Plaid rows first
  */
 export async function POST(request: Request) {
   try {
@@ -30,227 +34,293 @@ export async function POST(request: Request) {
     const { user_id } = body;
 
     if (!user_id) {
-      return NextResponse.json({ error: 'Missing user_id' }, { status: 400 });
+      return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
     }
 
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const start_date: string = body.start_date ?? '2024-09-01';
-    const end_date: string = body.end_date ?? today;
-    const purge: boolean = body.purge ?? false;
+    const today      = format(new Date(), "yyyy-MM-dd");
+    const start_date: string  = body.start_date ?? format(subMonths(new Date(), 18), "yyyy-MM-dd");
+    const end_date:   string  = body.end_date ?? today;
+    const purge:      boolean = body.purge ?? false;
 
     const supabase = await createClient();
 
-    // If purge=true, delete all Plaid-sourced transactions before re-inserting.
-    // Preserves manually-added transactions (plaid_transaction_id starts with "manual_").
-    // Use this after disconnecting + reconnecting a bank — Plaid assigns new IDs on
-    // every reconnect, so old rows become orphaned duplicates.
+    // ── Optional purge ───────────────────────────────────────────────────────
     if (purge) {
       console.log(`[backfill] Purging old Plaid transactions for user ${user_id}…`);
       const { error: purgeError, count } = await supabase
-        .from('transactions')
-        .delete({ count: 'exact' })
-        .eq('user_id', user_id)
-        .not('plaid_transaction_id', 'like', 'manual_%');
-
+        .from("transactions")
+        .delete({ count: "exact" })
+        .eq("user_id", user_id)
+        .not("plaid_transaction_id", "like", "manual_%");
       if (purgeError) {
-        console.error('[backfill] Purge error:', purgeError);
-        return NextResponse.json({ error: 'Failed to purge transactions' }, { status: 500 });
+        return NextResponse.json({ error: "Purge failed: " + purgeError.message }, { status: 500 });
       }
-      console.log(`[backfill] Purged ${count} old transactions`);
+      console.log(`[backfill] Purged ${count} rows`);
     }
 
-    const { data: plaidItems, error: itemsError } = await supabase
-      .from('plaid_items')
-      .select('id, access_token, institution_name')
-      .eq('user_id', user_id);
+    // ── Fetch connected Plaid items ──────────────────────────────────────────
+    const { data: plaidItems, error: itemsErr } = await supabase
+      .from("plaid_items")
+      .select("id, access_token, institution_name, cursor")
+      .eq("user_id", user_id);
 
-    if (itemsError) {
-      return NextResponse.json({ error: 'Failed to fetch bank connections' }, { status: 500 });
-    }
-    if (!plaidItems || plaidItems.length === 0) {
-      return NextResponse.json({ error: 'No banks connected for this user' }, { status: 400 });
+    if (itemsErr || !plaidItems?.length) {
+      return NextResponse.json({ error: "No banks connected for this user" }, { status: 400 });
     }
 
-    let totalAdded = 0;
-    const results: {
-      institution: string;
+    // Count DB rows before we start
+    const { count: countBefore } = await supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user_id)
+      .not("plaid_transaction_id", "like", "manual_%");
+
+    const byInstitution: {
+      institution:       string;
+      webhook_set:       boolean;
       refresh_triggered: boolean;
-      from_sync: number;
-      from_get: number;
+      monthly_results:   { month: string; plaid_count: number; inserted: number }[];
+      from_sync:         number;
+      plaid_total_claim: number;
     }[] = [];
 
     for (const item of plaidItems) {
-      console.log(`[backfill] Processing ${item.institution_name}`);
+      console.log(`[backfill] ── ${item.institution_name} ──────────────────────────`);
 
-      // ── Step 1: Force Plaid to re-pull full history from the bank ───────────────
+      // ── Phase 1: Register webhook ─────────────────────────────────────────
+      let webhookSet = false;
+      try {
+        await plaidClient.itemWebhookUpdate({
+          access_token: item.access_token,
+          webhook: WEBHOOK_URL,
+        });
+        webhookSet = true;
+        console.log(`[backfill] Webhook registered → ${WEBHOOK_URL}`);
+      } catch (e: unknown) {
+        console.warn("[backfill] itemWebhookUpdate failed:", (e as { response?: { data?: unknown } })?.response?.data ?? e);
+      }
+
+      // ── Phase 2: transactionsRefresh + 30s wait ───────────────────────────
       let refreshTriggered = false;
       try {
         await plaidClient.transactionsRefresh({ access_token: item.access_token });
         refreshTriggered = true;
-        console.log(`[backfill] transactionsRefresh triggered for ${item.institution_name} — waiting 8s for Plaid to process`);
-        await new Promise(r => setTimeout(r, 8000));
+        console.log("[backfill] transactionsRefresh fired — waiting 30s for Plaid to process…");
+        await new Promise(r => setTimeout(r, 30_000));
       } catch (e: unknown) {
         const errData = (e as { response?: { data?: unknown } })?.response?.data ?? e;
-        console.warn('[backfill] transactionsRefresh failed:', JSON.stringify(errData));
+        console.warn("[backfill] transactionsRefresh failed (non-fatal):", JSON.stringify(errData));
       }
-      console.log(`[backfill] refresh_triggered=${refreshTriggered}`);
 
-      // ── Step 2: Count existing rows before sync so we can report net-new ────────
-      const { count: beforeCount } = await supabase
-        .from('transactions')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user_id)
-        .not('plaid_transaction_id', 'like', 'manual_%');
+      // ── Phase 3: month-by-month transactionsGet ───────────────────────────
+      // Build month boundaries from start_date to end_date
+      const startParsed = parseISO(start_date);
+      const endParsed   = parseISO(end_date);
 
-      const rowsBefore = beforeCount ?? 0;
+      // Collect all months in range
+      const months: { start: string; end: string; label: string }[] = [];
+      let cursor = new Date(startParsed.getFullYear(), startParsed.getMonth(), 1);
+      while (cursor <= endParsed) {
+        months.push({
+          label: format(cursor, "yyyy-MM"),
+          start: format(startOfMonth(cursor), "yyyy-MM-dd"),
+          end:   format(endOfMonth(cursor),   "yyyy-MM-dd"),
+        });
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      }
 
-      // ── Step 3: Reset cursor and full re-sync via transactionsSync ─────────────
-      // Deleting the cursor means the next sync starts from the very beginning
-      // of Plaid's available history for this item.
-      await supabase.from('plaid_items').update({ cursor: null }).eq('id', item.id);
+      const monthlyResults: { month: string; plaid_count: number; inserted: number }[] = [];
+      let plaidTotalClaim = 0;
 
-      console.log(`[backfill] Running full transactionsSync from beginning...`);
-      let plaidSyncTotal = 0;
-      let cursor: string | undefined = undefined;
+      for (const { label, start: mStart, end: mEnd } of months) {
+        let offset = 0;
+        let monthTotal = 0;
+        let monthInserted = 0;
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { data: txData } = await plaidClient.transactionsGet({
+            access_token: item.access_token,
+            start_date:   mStart,
+            end_date:     mEnd,
+            options: {
+              count:  500,
+              offset,
+              include_personal_finance_category: true,
+            },
+          });
+
+          monthTotal = txData.total_transactions;
+          const txs  = txData.transactions;
+
+          if (txs.length > 0) {
+            const rows = txs.map(tx => ({
+              user_id,
+              plaid_transaction_id: tx.transaction_id,
+              amount_cents:  Math.round(tx.amount * 100),
+              posted_at:     tx.authorized_date || tx.date,
+              merchant_name: tx.merchant_name || tx.name || null,
+              description:   tx.name || tx.merchant_name || "Unknown",
+              category:      mapPlaidCategory(
+                tx.personal_finance_category?.primary ||
+                (Array.isArray(tx.category) ? tx.category[0] : null)
+              ),
+            }));
+
+            const { error: upsertErr } = await supabase
+              .from("transactions")
+              .upsert(rows, { onConflict: "plaid_transaction_id", ignoreDuplicates: true });
+
+            if (!upsertErr) {
+              monthInserted += txs.length;
+
+              // Always correct posted_at to authorized_date
+              const byDate: Record<string, string[]> = {};
+              for (const r of rows) {
+                if (!byDate[r.posted_at]) byDate[r.posted_at] = [];
+                byDate[r.posted_at].push(r.plaid_transaction_id);
+              }
+              await Promise.all(
+                Object.entries(byDate).map(([date, ids]) =>
+                  supabase.from("transactions").update({ posted_at: date }).in("plaid_transaction_id", ids)
+                )
+              );
+
+              // Fill null categories
+              const byCat: Record<string, string[]> = {};
+              for (const r of rows) {
+                if (!byCat[r.category]) byCat[r.category] = [];
+                byCat[r.category].push(r.plaid_transaction_id);
+              }
+              await Promise.all(
+                Object.entries(byCat).map(([cat, ids]) =>
+                  supabase.from("transactions").update({ category: cat }).in("plaid_transaction_id", ids).is("category", null)
+                )
+              );
+            } else {
+              console.error(`[backfill] upsert error for ${label}:`, upsertErr);
+            }
+          }
+
+          offset += txs.length;
+          if (offset >= monthTotal || txs.length === 0) break;
+        }
+
+        plaidTotalClaim += monthTotal;
+        monthlyResults.push({ month: label, plaid_count: monthTotal, inserted: monthInserted });
+        console.log(`[backfill] ${label}: Plaid has ${monthTotal}, inserted ${monthInserted}`);
+      }
+
+      // ── Phase 4: transactionsSync from null cursor (catches anything GET missed) ──
+      console.log("[backfill] Phase 4: Full transactionsSync from null cursor…");
+      await supabase.from("plaid_items").update({ cursor: null }).eq("id", item.id);
+
+      let syncCursor: string | undefined = undefined;
       let hasMore = true;
+      let syncTotal = 0;
 
       while (hasMore) {
-        const response = await plaidClient.transactionsSync({
+        const { data: syncData } = await plaidClient.transactionsSync({
           access_token: item.access_token,
-          cursor,
+          cursor: syncCursor,
           options: { include_personal_finance_category: true },
         });
 
-        const { added, modified, next_cursor } = response.data;
-        plaidSyncTotal += added.length;
+        const { added, modified, next_cursor } = syncData;
+        syncTotal += added.length;
 
         if (added.length > 0) {
-          const toUpsert = added.map(tx => {
-            const rawCat =
+          const rows = added.map(tx => ({
+            user_id,
+            plaid_transaction_id: tx.transaction_id,
+            amount_cents:  Math.round(tx.amount * 100),
+            posted_at:     tx.authorized_date || tx.date,
+            merchant_name: tx.merchant_name || tx.name || null,
+            description:   tx.name || tx.merchant_name || "Unknown",
+            category:      mapPlaidCategory(
               tx.personal_finance_category?.primary ||
-              (Array.isArray(tx.category) ? tx.category[0] : null);
-            return {
-              user_id,
-              plaid_transaction_id: tx.transaction_id,
-              amount_cents: Math.round(tx.amount * 100),
-              posted_at: tx.authorized_date || tx.date,
-              merchant_name: tx.merchant_name || tx.name || null,
-              description: tx.name || tx.merchant_name || 'Unknown',
-              category: mapPlaidCategory(rawCat),
-            };
-          });
+              (Array.isArray(tx.category) ? tx.category[0] : null)
+            ),
+          }));
 
-          const { error } = await supabase
-            .from('transactions')
-            .upsert(toUpsert, { onConflict: 'plaid_transaction_id', ignoreDuplicates: true });
-
-          if (!error) {
-            // Correct posted_at to authorized_date on pre-existing rows
-            const byDate: Record<string, string[]> = {};
-            for (const tx of toUpsert) {
-              if (!byDate[tx.posted_at]) byDate[tx.posted_at] = [];
-              byDate[tx.posted_at].push(tx.plaid_transaction_id);
-            }
-            for (const [date, ids] of Object.entries(byDate)) {
-              await supabase
-                .from('transactions')
-                .update({ posted_at: date })
-                .in('plaid_transaction_id', ids);
-            }
-            // Fill null categories on pre-existing rows
-            const byCategory: Record<string, string[]> = {};
-            for (const tx of toUpsert) {
-              if (!byCategory[tx.category]) byCategory[tx.category] = [];
-              byCategory[tx.category].push(tx.plaid_transaction_id);
-            }
-            for (const [cat, ids] of Object.entries(byCategory)) {
-              await supabase
-                .from('transactions')
-                .update({ category: cat })
-                .in('plaid_transaction_id', ids)
-                .is('category', null);
-            }
-          } else {
-            console.error('[backfill] sync upsert error:', error);
-          }
+          await supabase
+            .from("transactions")
+            .upsert(rows, { onConflict: "plaid_transaction_id", ignoreDuplicates: true });
         }
 
-        // Apply modifications (but never overwrite user-set category)
         if (modified.length > 0) {
           for (const tx of modified) {
             await supabase
-              .from('transactions')
+              .from("transactions")
               .update({
-                amount_cents: Math.round(tx.amount * 100),
-                posted_at: tx.date,
+                amount_cents:  Math.round(tx.amount * 100),
+                posted_at:     tx.authorized_date || tx.date,
                 merchant_name: tx.merchant_name || tx.name || null,
-                description: tx.name || tx.merchant_name || 'Unknown',
+                description:   tx.name || tx.merchant_name || "Unknown",
               })
-              .eq('plaid_transaction_id', tx.transaction_id);
+              .eq("plaid_transaction_id", tx.transaction_id);
           }
         }
 
-        cursor = next_cursor;
-        hasMore = response.data.has_more;
+        syncCursor = next_cursor;
+        hasMore = syncData.has_more;
       }
 
-      // Save the cursor so future incremental syncs are fast
-      if (cursor) {
-        await supabase.from('plaid_items').update({ cursor }).eq('id', item.id);
+      // Save final cursor
+      if (syncCursor) {
+        await supabase.from("plaid_items").update({ cursor: syncCursor }).eq("id", item.id);
       }
-      console.log(`[backfill] transactionsSync told us about ${plaidSyncTotal} transactions for ${item.institution_name}`);
+      console.log(`[backfill] Phase 4 sync reported ${syncTotal} transactions`);
 
-      // ── Step 4: transactionsGet over the explicit date range (second pass) ───
-      // transactionsSync and transactionsGet use different backend pipelines.
-      // Running both maximises coverage.
-      console.log(`[backfill] Running transactionsGet (${start_date} → ${end_date})...`);
-      const { transactions_added: plaidGetTotal } = await backfillTransactions(
-        supabase,
-        item.access_token,
-        user_id,
-        start_date,
-        end_date,
-      );
-      console.log(`[backfill] transactionsGet saw ${plaidGetTotal} transactions`);
-
-      // ── Count actual unique rows now in DB (the only number that matters) ─────
-      const { count: afterCount } = await supabase
-        .from('transactions')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user_id)
-        .not('plaid_transaction_id', 'like', 'manual_%');
-
-      const rowsAfter = afterCount ?? 0;
-      const netNew    = rowsAfter - rowsBefore;
-
-      totalAdded += netNew;
-      results.push({
-        institution:       item.institution_name ?? 'Unknown',
+      byInstitution.push({
+        institution:       item.institution_name ?? "Unknown",
+        webhook_set:       webhookSet,
         refresh_triggered: refreshTriggered,
-        from_sync:         plaidSyncTotal,
-        from_get:          plaidGetTotal,
+        monthly_results:   monthlyResults,
+        from_sync:         syncTotal,
+        plaid_total_claim: plaidTotalClaim,
       });
     }
 
-    // Count the final DB total so the UI shows an accurate number
-    const { count: finalCount } = await supabase
-      .from('transactions')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user_id);
+    // ── Final DB count ───────────────────────────────────────────────────────
+    const { count: countAfter } = await supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user_id);
+
+    const { data: oldestRow } = await supabase
+      .from("transactions")
+      .select("posted_at")
+      .eq("user_id", user_id)
+      .order("posted_at", { ascending: true })
+      .limit(1);
+
+    const { data: newestRow } = await supabase
+      .from("transactions")
+      .select("posted_at")
+      .eq("user_id", user_id)
+      .order("posted_at", { ascending: false })
+      .limit(1);
+
+    const netNew = (countAfter ?? 0) - (countBefore ?? 0);
 
     return NextResponse.json({
-      success: true,
-      purged: purge,
-      date_range: { start_date, end_date },
-      // net_new = rows actually inserted this run (not double-counted)
-      net_new_transactions: totalAdded,
-      // total_in_db = every transaction (Plaid + manual) currently in your account
-      total_in_db: finalCount ?? 0,
-      note: 'Plaid only serves what it has cached. If total_in_db is less than your bank shows, disconnect + reconnect Citibank so Plaid triggers a fresh HISTORICAL_UPDATE_COMPLETE.',
-      by_institution: results,
+      success:           true,
+      purged:            purge,
+      date_range:        { start_date, end_date },
+      db_before:         countBefore ?? 0,
+      db_after:          countAfter  ?? 0,
+      net_new:           netNew,
+      oldest_in_db:      oldestRow?.[0]?.posted_at ?? null,
+      newest_in_db:      newestRow?.[0]?.posted_at ?? null,
+      by_institution:    byInstitution,
+      diagnosis: netNew === 0 && (countAfter ?? 0) < 400
+        ? "Plaid may still be loading your full history. The HISTORICAL_UPDATE_COMPLETE webhook will fire when ready — the webhook is now registered and will auto-sync. Try again in 30 minutes."
+        : null,
     });
-  } catch (error) {
-    console.error('[backfill] Error:', error);
-    return NextResponse.json({ error: 'Backfill failed' }, { status: 500 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[backfill] Fatal:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

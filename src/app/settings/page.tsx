@@ -24,6 +24,7 @@ import {
   Sun,
   Moon,
   Monitor,
+  Activity,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
@@ -45,6 +46,35 @@ type HealthData = {
 type WhoopConnection = {
   whoop_user_id: number | null;
   updated_at: string;
+};
+
+type BackfillResult = {
+  success: boolean;
+  db_before: number;
+  db_after: number;
+  net_new: number;
+  oldest_in_db: string | null;
+  newest_in_db: string | null;
+  by_institution: {
+    institution: string;
+    webhook_set: boolean;
+    refresh_triggered: boolean;
+    monthly_results: { month: string; plaid_count: number; inserted: number }[];
+    from_sync: number;
+    plaid_total_claim: number;
+  }[];
+  diagnosis: string | null;
+  error?: string;
+};
+
+type DiagnoseResult = {
+  db: { total: number; oldest: string | null; newest: string | null };
+  plaid_item_db: { id: string; item_id: string; institution: string; cursor: string; connected_at: string };
+  plaid_item_live: { webhook?: string | null; error?: string | null; update_type?: string | null; available_products?: string[]; billed_products?: string[] };
+  plaid_full_range: { start_date: string; end_date: string; total_claimed: number; gap: number; error?: string | null };
+  monthly_breakdown: { month: string; plaid_count: number | null; db_count: number; plaid_error?: string }[];
+  monthly_totals: { plaid_sum: number; db_total: number; gap: number };
+  error?: string;
 };
 
 const CARD = "rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]";
@@ -75,9 +105,11 @@ function SettingsPageInner() {
   const [disconnecting, setDisconnecting]           = useState<string | null>(null);
   const [copied, setCopied]                         = useState(false);
   const [backfilling, setBackfilling]               = useState(false);
-  const [backfillResult, setBackfillResult]         = useState<string | null>(null);
+  const [backfillResult, setBackfillResult]         = useState<BackfillResult | null>(null);
   const [updatingWebhook, setUpdatingWebhook]       = useState(false);
   const [webhookResult, setWebhookResult]           = useState<string | null>(null);
+  const [diagnosing, setDiagnosing]                 = useState(false);
+  const [diagnoseResult, setDiagnoseResult]         = useState<DiagnoseResult | null>(null);
   const [whoopError, setWhoopError]                 = useState<string | null>(null);
   const [whoopBackfilling, setWhoopBackfilling]     = useState(false);
   const [whoopBackfillResult, setWhoopBackfillResult] = useState<string | null>(null);
@@ -229,27 +261,46 @@ function SettingsPageInner() {
       const res  = await fetch("/api/plaid/backfill", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ user_id: userId, start_date: "2024-09-05" }),
+        body:    JSON.stringify({ user_id: userId, start_date: "2025-09-01" }),
       });
-      const data = await res.json();
+      const data: BackfillResult = await res.json();
+      setBackfillResult(data);
       if (data.success) {
-        const total  = data.total_in_db ?? 0;
-        const netNew = data.net_new_transactions ?? 0;
-        setBackfillResult(
-          `Done — ${total.toLocaleString()} transactions in Spine` +
-          (netNew > 0 ? ` (+${netNew} new this run).` : ` (no new rows added).`) +
-          (total < 600 ? " Plaid is still fetching your full history in the background — run backfill again in 30 min to see it grow." : "")
-        );
-        toast(`Backfill complete — ${total.toLocaleString()} total transactions in Spine`, "success");
+        toast(`Backfill done — ${data.db_after.toLocaleString()} total, +${data.net_new} new`, "success");
       } else {
-        setBackfillResult(`Error: ${data.error}`);
         toast(data.error ?? "Backfill failed", "error");
       }
-    } catch {
-      setBackfillResult("Network error — check Vercel logs.");
-      toast("Backfill failed", "error");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setBackfillResult({ success: false, db_before: 0, db_after: 0, net_new: 0, oldest_in_db: null, newest_in_db: null, by_institution: [], diagnosis: null, error: msg });
+      toast("Backfill failed — check Vercel logs", "error");
     }
     setBackfilling(false);
+  }
+
+  async function runDiagnose() {
+    if (!userId) return;
+    setDiagnosing(true);
+    setDiagnoseResult(null);
+    try {
+      const res  = await fetch("/api/plaid/diagnose", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ user_id: userId, months: 18 }),
+      });
+      const data: DiagnoseResult = await res.json();
+      setDiagnoseResult(data);
+      if (data.error) {
+        toast(`Diagnose error: ${data.error}`, "error");
+      } else {
+        toast(`Diagnosis complete — Plaid has ${data.plaid_full_range?.total_claimed ?? "?"}, DB has ${data.db?.total ?? "?"}`, "info");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDiagnoseResult({ db: { total: 0, oldest: null, newest: null }, plaid_item_db: { id: "", item_id: "", institution: "", cursor: "", connected_at: "" }, plaid_item_live: {}, plaid_full_range: { start_date: "", end_date: "", total_claimed: 0, gap: 0 }, monthly_breakdown: [], monthly_totals: { plaid_sum: 0, db_total: 0, gap: 0 }, error: msg });
+      toast("Diagnose failed", "error");
+    }
+    setDiagnosing(false);
   }
 
   async function backfillWhoop() {
@@ -443,17 +494,95 @@ function SettingsPageInner() {
                 </div>
               </div>
 
+              {/* Diagnose */}
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--text)]">Diagnose transaction gap</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                      Queries Plaid directly and shows exactly what it has per month vs what&apos;s in Spine. Helps pinpoint whether the gap is on Plaid&apos;s side or ours.
+                    </p>
+                  </div>
+                  <button
+                    onClick={runDiagnose}
+                    disabled={diagnosing}
+                    className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] border border-[var(--border)] text-[var(--text-dim)] text-sm font-semibold disabled:opacity-40 transition-colors"
+                  >
+                    <Activity className={`w-3.5 h-3.5 ${diagnosing ? "animate-pulse" : ""}`} />
+                    {diagnosing ? "Diagnosing…" : "Diagnose"}
+                  </button>
+                </div>
+                {diagnosing && (
+                  <p className="text-xs text-[var(--text-muted)] mt-2 animate-pulse">
+                    Querying Plaid month-by-month… takes ~20–30s. Don&apos;t close the page.
+                  </p>
+                )}
+                {diagnoseResult && !diagnoseResult.error && (
+                  <div className="mt-3 space-y-3">
+                    {/* Summary row */}
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: "Spine DB",      val: diagnoseResult.db.total.toLocaleString(), sub: `${diagnoseResult.db.oldest ?? "?"} → ${diagnoseResult.db.newest ?? "?"}` },
+                        { label: "Plaid claims",  val: (diagnoseResult.plaid_full_range.total_claimed ?? 0).toLocaleString(), sub: "total_transactions" },
+                        { label: "Gap",           val: Math.max(0, diagnoseResult.plaid_full_range.gap ?? 0).toLocaleString(), sub: diagnoseResult.plaid_full_range.gap > 0 ? "missing from Spine" : "in sync ✓" },
+                      ].map(({ label, val, sub }) => (
+                        <div key={label} className="bg-[var(--glass-subtle)] border border-[var(--border)] rounded-lg p-3 text-center">
+                          <div className="text-lg font-bold text-[var(--text-strong)]">{val}</div>
+                          <div className="text-xs font-medium text-[var(--text-dim)]">{label}</div>
+                          <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{sub}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Webhook status */}
+                    <div className="flex items-center gap-2 text-xs text-[var(--text-dim)]">
+                      <span className="font-medium">Webhook:</span>
+                      {diagnoseResult.plaid_item_live.webhook
+                        ? <span className="text-[var(--safe)]">{String(diagnoseResult.plaid_item_live.webhook)}</span>
+                        : <span className="text-[var(--warn)]">Not set — run Update webhook</span>
+                      }
+                    </div>
+                    {diagnoseResult.plaid_item_live.error && (
+                      <div className="text-xs text-[var(--danger)] bg-[var(--danger-dim)] border border-[var(--danger)]/20 rounded-lg px-3 py-2">
+                        Plaid item error: {diagnoseResult.plaid_item_live.error}
+                      </div>
+                    )}
+                    {/* Month-by-month table */}
+                    <div className="bg-[var(--glass-subtle)] border border-[var(--border)] rounded-lg overflow-hidden">
+                      <div className="grid grid-cols-3 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider px-3 py-2 border-b border-[var(--border)]">
+                        <span>Month</span><span className="text-right">Plaid</span><span className="text-right">Spine</span>
+                      </div>
+                      <div className="max-h-52 overflow-y-auto">
+                        {diagnoseResult.monthly_breakdown.map(m => {
+                          const gap = (m.plaid_count ?? 0) - m.db_count;
+                          return (
+                            <div key={m.month} className={`grid grid-cols-3 px-3 py-1.5 text-xs border-b border-[var(--border)]/50 last:border-0 ${gap > 0 ? "bg-[var(--warn-dim)]" : ""}`}>
+                              <span className="text-[var(--text-dim)]">{m.month}</span>
+                              <span className={`text-right font-mono ${m.plaid_error ? "text-[var(--danger)]" : "text-[var(--text)]"}`}>
+                                {m.plaid_error ? "err" : (m.plaid_count ?? 0)}
+                              </span>
+                              <span className={`text-right font-mono ${gap > 0 ? "text-[var(--warn)]" : "text-[var(--text)]"}`}>
+                                {m.db_count}{gap > 0 ? ` (-${gap})` : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {diagnoseResult?.error && (
+                  <p className="text-xs text-[var(--danger)] mt-2">{diagnoseResult.error}</p>
+                )}
+              </div>
+
               {/* Backfill */}
               <div className="mt-4 pt-4 border-t border-[var(--border)]">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-[var(--text)]">Full history backfill</p>
                     <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                      Forces Plaid to re-fetch everything from Sept 5, 2024 → today using both sync and get pipelines. Safe to run multiple times — no duplicates.
+                      Registers webhook, triggers refresh, then fetches month-by-month from Sept 2025 → today. Takes ~45–60s. Safe to run multiple times.
                     </p>
-                    {backfillResult && (
-                      <p className="text-xs text-[var(--safe)] mt-1.5">{backfillResult}</p>
-                    )}
                   </div>
                   <button
                     onClick={runBackfill}
@@ -461,13 +590,54 @@ function SettingsPageInner() {
                     className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] text-sm font-semibold disabled:opacity-40 transition-colors"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${backfilling ? "animate-spin" : ""}`} />
-                    {backfilling ? "Running…" : "Run backfill"}
+                    {backfilling ? "Running (45–60s)…" : "Run backfill"}
                   </button>
                 </div>
                 {backfilling && (
-                  <p className="text-xs text-[var(--text-muted)] mt-2">
-                    This takes 15–30 seconds — Plaid needs time to refresh. Don&apos;t close the page.
+                  <p className="text-xs text-[var(--text-muted)] mt-2 animate-pulse">
+                    Registering webhook → refreshing Plaid → fetching month by month… Don&apos;t close the page.
                   </p>
+                )}
+                {backfillResult && (
+                  <div className="mt-3 space-y-2">
+                    {backfillResult.error ? (
+                      <p className="text-xs text-[var(--danger)]">{backfillResult.error}</p>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { label: "Before", val: backfillResult.db_before.toLocaleString() },
+                            { label: "After",  val: backfillResult.db_after.toLocaleString() },
+                            { label: "New",    val: `+${backfillResult.net_new.toLocaleString()}` },
+                          ].map(({ label, val }) => (
+                            <div key={label} className="bg-[var(--glass-subtle)] border border-[var(--border)] rounded-lg p-2 text-center">
+                              <div className="text-base font-bold text-[var(--text-strong)]">{val}</div>
+                              <div className="text-[10px] text-[var(--text-muted)]">{label}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {backfillResult.oldest_in_db && (
+                          <p className="text-xs text-[var(--text-muted)]">
+                            Date range in DB: {backfillResult.oldest_in_db} → {backfillResult.newest_in_db}
+                          </p>
+                        )}
+                        {backfillResult.by_institution.map(inst => (
+                          <div key={inst.institution} className="text-xs text-[var(--text-dim)] space-y-0.5">
+                            <span className="font-medium text-[var(--text)]">{inst.institution}</span>
+                            {" — "}Plaid had {inst.plaid_total_claim.toLocaleString()} total
+                            {" · "}sync reported {inst.from_sync.toLocaleString()}
+                            {" · "}webhook {inst.webhook_set ? "✓" : "✗"}
+                            {" · "}refresh {inst.refresh_triggered ? "✓" : "✗"}
+                          </div>
+                        ))}
+                        {backfillResult.diagnosis && (
+                          <p className="text-xs text-[var(--warn)] bg-[var(--warn-dim)] border border-[var(--warn)]/20 rounded-lg px-3 py-2">
+                            {backfillResult.diagnosis}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
