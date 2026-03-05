@@ -69,6 +69,7 @@ type BackfillResult = {
 
 type DiagnoseResult = {
   db: { total: number; oldest: string | null; newest: string | null };
+  linked_accounts?: { account_id: string; name: string; official_name: string | null; type: string; subtype: string | null; mask: string | null }[];
   plaid_item_db: { id: string; item_id: string; institution: string; cursor: string; connected_at: string };
   plaid_item_live: { webhook?: string | null; error?: string | null; update_type?: string | null; available_products?: string[]; billed_products?: string[] };
   plaid_full_range: { start_date: string; end_date: string; total_claimed: number; gap: number; error?: string | null };
@@ -533,6 +534,35 @@ function SettingsPageInner() {
                         </div>
                       ))}
                     </div>
+                    {/* Linked accounts — the most important diagnostic */}
+                    {diagnoseResult.linked_accounts && diagnoseResult.linked_accounts.length > 0 && (
+                      <div className="bg-[var(--glass-subtle)] border border-[var(--border)] rounded-lg p-3 space-y-2">
+                        <p className="text-xs font-semibold text-[var(--text-dim)] uppercase tracking-wider">Linked accounts ({diagnoseResult.linked_accounts.length})</p>
+                        {diagnoseResult.linked_accounts.map(a => {
+                          const isCredit = a.type === "credit" || a.subtype === "credit card";
+                          const isDepository = a.type === "depository";
+                          return (
+                            <div key={a.account_id} className={`flex items-center justify-between px-3 py-2 rounded-lg border text-xs ${isCredit ? "border-[var(--gold)]/40 bg-[var(--gold)]/5" : "border-[var(--border)]"}`}>
+                              <div>
+                                <span className="font-medium text-[var(--text)]">{a.official_name ?? a.name}</span>
+                                {a.mask && <span className="text-[var(--text-muted)] ml-1">••{a.mask}</span>}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${isCredit ? "bg-[var(--gold)]/15 text-[var(--gold)]" : isDepository ? "bg-[var(--safe-dim)] text-[var(--safe)]" : "bg-[var(--glass-mid)] text-[var(--text-muted)]"}`}>
+                                  {a.subtype ?? a.type}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {diagnoseResult.linked_accounts.every(a => a.type !== "credit") && (
+                          <p className="text-xs text-[var(--warn)] mt-1">
+                            ⚠ No credit card linked — your spending transactions are likely on a Citi credit card, not your checking/savings account. Disconnect and reconnect Citibank, and make sure to select your credit card during the Plaid flow.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {/* Webhook status */}
                     <div className="flex items-center gap-2 text-xs text-[var(--text-dim)]">
                       <span className="font-medium">Webhook:</span>

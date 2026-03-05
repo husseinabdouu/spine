@@ -60,23 +60,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ received: true });
     }
 
-    // HISTORICAL_UPDATE_COMPLETE and INITIAL_UPDATE_COMPLETE mean Plaid just
-    // finished fetching the full history from the bank. Force a full re-sync
-    // (cursor reset) so we pull everything, not just the delta.
-    const forceResync = isHistoricalComplete || isInitialComplete;
+    console.log(`[webhook] ${webhookCode} for item ${itemId}`);
 
-    console.log(`[webhook] ${webhookCode} for item ${itemId} — force_resync=${forceResync}`);
-
-    const syncUrl = `${appUrl}/api/plaid/sync-transactions`;
-    const syncRes = await fetch(syncUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: plaidItem.user_id, force_resync: forceResync }),
-    });
-
-    if (!syncRes.ok) {
-      const errText = await syncRes.text();
-      console.error('[webhook] Sync failed:', syncRes.status, errText);
+    if (isHistoricalComplete || isInitialComplete) {
+      // Plaid just finished loading the full transaction history from the bank.
+      // Use the deep backfill (month-by-month transactionsGet + transactionsSync)
+      // rather than a simple sync — this guarantees we capture the entire history.
+      console.log(`[webhook] ${webhookCode} — triggering full backfill`);
+      const backfillUrl = `${appUrl}/api/plaid/backfill`;
+      const backfillRes = await fetch(backfillUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: plaidItem.user_id }),
+      });
+      if (!backfillRes.ok) {
+        const errText = await backfillRes.text();
+        console.error('[webhook] Backfill failed:', backfillRes.status, errText);
+      } else {
+        const result = await backfillRes.json();
+        console.log(`[webhook] Backfill complete — db_after=${result.db_after}, net_new=${result.net_new}`);
+      }
+    } else {
+      // SYNC_UPDATES_AVAILABLE — incremental sync only
+      const syncUrl = `${appUrl}/api/plaid/sync-transactions`;
+      const syncRes = await fetch(syncUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: plaidItem.user_id, force_resync: false }),
+      });
+      if (!syncRes.ok) {
+        const errText = await syncRes.text();
+        console.error('[webhook] Sync failed:', syncRes.status, errText);
+      }
     }
 
     return NextResponse.json({ received: true });

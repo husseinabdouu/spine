@@ -91,7 +91,25 @@ export async function POST(request: Request) {
       };
     }
 
-    // ── 4. Plaid total_transactions for the full range ────────────────────────
+    // ── 4. Plaid accountsGet — which accounts are actually linked ─────────────
+    let linkedAccounts: { account_id: string; name: string; official_name: string | null; type: string; subtype: string | null; mask: string | null }[] = [];
+    try {
+      const { data: acctData } = await plaidClient.accountsGet({
+        access_token: item.access_token,
+      });
+      linkedAccounts = acctData.accounts.map(a => ({
+        account_id:    a.account_id,
+        name:          a.name,
+        official_name: a.official_name ?? null,
+        type:          a.type,
+        subtype:       a.subtype ?? null,
+        mask:          a.mask ?? null,
+      }));
+    } catch (e: unknown) {
+      console.warn("[diagnose] accountsGet failed:", e);
+    }
+
+    // ── 6. Plaid total_transactions for the full range ────────────────────────
     const today       = format(new Date(), "yyyy-MM-dd");
     const cutoffDate  = format(subMonths(new Date(), months), "yyyy-MM-dd");
 
@@ -109,7 +127,7 @@ export async function POST(request: Request) {
       plaidTotalError = (e as { response?: { data?: { error_message?: string } } })?.response?.data?.error_message ?? String(e);
     }
 
-    // ── 5. Month-by-month breakdown ───────────────────────────────────────────
+    // ── 7. Month-by-month breakdown ───────────────────────────────────────────
     const monthlyBreakdown: {
       month: string;
       plaid_count:   number | null;
@@ -164,6 +182,7 @@ export async function POST(request: Request) {
         oldest:   (dbRange as { oldest: string | null; newest: string | null }).oldest,
         newest:   (dbRange as { oldest: string | null; newest: string | null }).newest,
       },
+      linked_accounts: linkedAccounts,
       plaid_item_db: {
         id:           item.id,
         item_id:      item.item_id,
