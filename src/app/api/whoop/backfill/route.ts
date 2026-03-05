@@ -162,6 +162,27 @@ export async function POST(request: Request) {
       `${sleepRecords.length} sleep, ${cycleRecords.length} cycle records`,
     );
 
+    // Log score states so we can diagnose if records are returning unscored
+    const recoveryStates: Record<string, number> = {};
+    for (const r of recoveryRecords) {
+      recoveryStates[r.score_state] = (recoveryStates[r.score_state] ?? 0) + 1;
+    }
+    const sleepStates: Record<string, number> = {};
+    for (const s of sleepRecords) {
+      sleepStates[s.score_state] = (sleepStates[s.score_state] ?? 0) + 1;
+    }
+    const cycleStates: Record<string, number> = {};
+    for (const c of cycleRecords) {
+      cycleStates[c.score_state] = (cycleStates[c.score_state] ?? 0) + 1;
+    }
+    console.log("[whoop/backfill] Score states — recovery:", JSON.stringify(recoveryStates),
+      "sleep:", JSON.stringify(sleepStates), "cycle:", JSON.stringify(cycleStates));
+
+    // Log sample dates so we can see alignment
+    if (recoveryRecords.length > 0) console.log("[whoop/backfill] Recovery sample created_at:", recoveryRecords[0].created_at);
+    if (sleepRecords.length > 0)    console.log("[whoop/backfill] Sleep sample start:", sleepRecords[0].start, "end:", sleepRecords[0].end);
+    if (cycleRecords.length > 0)    console.log("[whoop/backfill] Cycle sample start:", cycleRecords[0].start);
+
     // ── Index by date ──────────────────────────────────────────────────────────
     const recoveryByDate = new Map<string, WhoopRecoveryRecord>();
     for (const r of recoveryRecords) {
@@ -264,15 +285,28 @@ export async function POST(request: Request) {
       else upserted += batch.length;
     }
 
+    const scoredRecovery = recoveryRecords.filter(r => r.score_state === "SCORED").length;
+    const scoredSleep    = sleepRecords.filter(s => s.score_state === "SCORED" && !s.nap).length;
+    const scoredCycle    = cycleRecords.filter(c => c.score_state === "SCORED").length;
+
     console.log(`[whoop/backfill] Done — upserted ${upserted} days`);
 
     return NextResponse.json({
       success:       true,
       days_upserted: upserted,
-      records: {
-        recovery: recoveryRecords.length,
-        sleep:    sleepRecords.length,
-        cycle:    cycleRecords.length,
+      fetched: {
+        recovery_total:  recoveryRecords.length,
+        recovery_scored: scoredRecovery,
+        sleep_total:     sleepRecords.length,
+        sleep_scored:    scoredSleep,
+        cycle_total:     cycleRecords.length,
+        cycle_scored:    scoredCycle,
+      },
+      dates_merged: allDates.size,
+      sample_dates: {
+        recovery_first: recoveryRecords[0]?.created_at?.slice(0, 10) ?? null,
+        sleep_first_end: sleepRecords[0]?.end?.slice(0, 10) ?? null,
+        cycle_first: cycleRecords[0]?.start?.slice(0, 10) ?? null,
       },
     });
   } catch (err) {
