@@ -71,6 +71,8 @@ function SettingsPageInner() {
   const [copied, setCopied]                         = useState(false);
   const [backfilling, setBackfilling]               = useState(false);
   const [backfillResult, setBackfillResult]         = useState<string | null>(null);
+  const [updatingWebhook, setUpdatingWebhook]       = useState(false);
+  const [webhookResult, setWebhookResult]           = useState<string | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -162,6 +164,34 @@ function SettingsPageInner() {
   function handlePlaidSuccess() {
     toast("Bank connected! Fetching transaction history…", "success");
     loadPlaidItems();
+  }
+
+  async function updateWebhook() {
+    if (!userId) return;
+    setUpdatingWebhook(true);
+    setWebhookResult(null);
+    try {
+      const res  = await fetch("/api/plaid/update-webhook", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ user_id: userId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const ok = (data.results as { institution: string; success: boolean }[])
+          .filter(r => r.success)
+          .map(r => r.institution)
+          .join(", ");
+        setWebhookResult(`Webhook updated for: ${ok}. Plaid will now send transaction events to Spine.`);
+        toast("Webhook updated!", "success");
+      } else {
+        setWebhookResult(`Error: ${data.error}`);
+        toast(data.error ?? "Failed", "error");
+      }
+    } catch {
+      toast("Failed to update webhook", "error");
+    }
+    setUpdatingWebhook(false);
   }
 
   async function runBackfill() {
@@ -325,6 +355,29 @@ function SettingsPageInner() {
                 <PlaidLink onSuccess={handlePlaidSuccess} />
               </div>
 
+              {/* Update webhook */}
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--text)]">Update webhook</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                      Tells Plaid where to send transaction events. Run this once if your bank was connected before the production URL was configured — it unlocks the full 24-month history sync.
+                    </p>
+                    {webhookResult && (
+                      <p className="text-xs text-[var(--safe)] mt-1.5">{webhookResult}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={updateWebhook}
+                    disabled={updatingWebhook}
+                    className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] border border-[var(--border)] text-[var(--text-dim)] text-sm font-semibold disabled:opacity-40 transition-colors"
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${updatingWebhook ? "animate-pulse" : ""}`} />
+                    {updatingWebhook ? "Updating…" : "Update webhook"}
+                  </button>
+                </div>
+              </div>
+
               {/* Backfill */}
               <div className="mt-4 pt-4 border-t border-[var(--border)]">
                 <div className="flex items-start justify-between gap-4">
@@ -457,9 +510,18 @@ function SettingsPageInner() {
             <h2 className="text-sm font-semibold text-[var(--text-dim)] uppercase tracking-widest">Whoop</h2>
           </div>
 
+          {/* Status pill */}
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-4 ${
+            whoopConn
+              ? "bg-[var(--safe-dim)] text-[var(--safe)]"
+              : "bg-white/[0.06] text-[var(--text-muted)]"
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${whoopConn ? "bg-[var(--safe)]" : "bg-[var(--text-muted)]"}`} />
+            {whoopConn ? "Connected" : "Not connected"}
+          </div>
+
           {whoopConn ? (
             <div className="space-y-4">
-              {/* Connected status */}
               <div className="flex items-start gap-3 p-4 rounded-lg bg-white/[0.03] border border-[var(--border)]">
                 <CheckCircle className="w-4 h-4 text-[var(--safe)] mt-0.5 shrink-0" />
                 <div className="min-w-0">
@@ -467,6 +529,11 @@ function SettingsPageInner() {
                   {whoopConn.updated_at && (
                     <div className="text-xs text-[var(--text-muted)] mt-0.5">
                       Last synced {format(parseISO(whoopConn.updated_at), "MMM d, yyyy 'at' h:mm a")}
+                    </div>
+                  )}
+                  {whoopConn.whoop_user_id && (
+                    <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                      Whoop user #{whoopConn.whoop_user_id}
                     </div>
                   )}
                 </div>
@@ -491,7 +558,7 @@ function SettingsPageInner() {
               </div>
 
               <p className="text-xs text-[var(--text-muted)]">
-                Recovery, sleep, and strain data syncs automatically via Whoop webhooks. Use "Sync now" to pull the latest manually.
+                Recovery, sleep, and strain sync automatically via webhooks. Use &ldquo;Sync now&rdquo; to pull the latest manually.
               </p>
             </div>
           ) : (
@@ -510,7 +577,7 @@ function SettingsPageInner() {
                 Connect Whoop
               </button>
               <p className="text-xs text-[var(--text-muted)]">
-                You&apos;ll be redirected to Whoop to authorise access. Spine requests read-only permissions for recovery, sleep, and activity data.
+                You&apos;ll be redirected to Whoop to authorise. Spine requests read-only access to recovery, sleep, and activity.
               </p>
             </div>
           )}
