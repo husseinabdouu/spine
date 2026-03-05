@@ -74,6 +74,7 @@ export async function POST(request: Request) {
     let totalAdded = 0;
     const results: {
       institution: string;
+      refresh_triggered: boolean;
       from_sync: number;
       from_get: number;
     }[] = [];
@@ -81,7 +82,20 @@ export async function POST(request: Request) {
     for (const item of plaidItems) {
       console.log(`[backfill] Processing ${item.institution_name}`);
 
-      // ── Step 1: Reset cursor and full re-sync via transactionsSync ─────────────
+      // ── Step 1: Force Plaid to re-pull full history from the bank ───────────────
+      let refreshTriggered = false;
+      try {
+        await plaidClient.transactionsRefresh({ access_token: item.access_token });
+        refreshTriggered = true;
+        console.log(`[backfill] transactionsRefresh triggered for ${item.institution_name} — waiting 8s for Plaid to process`);
+        await new Promise(r => setTimeout(r, 8000));
+      } catch (e: unknown) {
+        const errData = (e as { response?: { data?: unknown } })?.response?.data ?? e;
+        console.warn('[backfill] transactionsRefresh failed:', JSON.stringify(errData));
+      }
+      console.log(`[backfill] refresh_triggered=${refreshTriggered}`);
+
+      // ── Step 2: Reset cursor and full re-sync via transactionsSync ─────────────
       // Deleting the cursor means the next sync starts from the very beginning
       // of Plaid's available history for this item.
       await supabase.from('plaid_items').update({ cursor: null }).eq('id', item.id);
@@ -193,6 +207,7 @@ export async function POST(request: Request) {
       totalAdded += syncAdded + getAdded;
       results.push({
         institution: item.institution_name ?? 'Unknown',
+        refresh_triggered: refreshTriggered,
         from_sync: syncAdded,
         from_get: getAdded,
       });

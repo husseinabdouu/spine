@@ -20,6 +20,11 @@ interface BehavioralInsight {
   spending_summary: { last_7_days: string; prev_7_days: string; change_percent: string };
 }
 
+interface RiskHistoryPoint {
+  date: string;
+  risk_score: number;
+}
+
 interface HealthData {
   date: string;
   sleep_hours: number | null;
@@ -104,7 +109,7 @@ export default function InsightsPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [insight, setInsight] = useState<BehavioralInsight | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
-  const [recentInsights, setRecentInsights] = useState<BehavioralInsight[]>([]);
+  const [recentInsights, setRecentInsights] = useState<RiskHistoryPoint[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
