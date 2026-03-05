@@ -78,20 +78,22 @@ function SettingsPageInner() {
 
   // Handle OAuth return params
   useEffect(() => {
-    const whoop = searchParams.get("whoop");
-    const error = searchParams.get("error");
+    const whoop  = searchParams.get("whoop");
+    const error  = searchParams.get("error");
+    const detail = searchParams.get("detail");
     if (whoop === "connected") {
       toast("Whoop connected! Syncing yesterday's data…", "success");
-      // Remove params from URL
+      loadWhoopConnection(); // refresh UI immediately
       router.replace("/settings");
     } else if (error?.startsWith("whoop")) {
-      const msgs: Record<string, string> = {
+      const base: Record<string, string> = {
         whoop_denied:        "Whoop authorisation was cancelled.",
-        whoop_failed:        "Failed to connect Whoop. Please try again.",
+        whoop_failed:        "Whoop connection failed.",
         whoop_db_error:      "Could not save Whoop connection.",
         whoop_invalid_state: "Invalid OAuth state. Please try again.",
       };
-      toast(msgs[error] ?? "Whoop connection error.", "error");
+      const msg = (base[error] ?? "Whoop connection error.") + (detail ? ` (${decodeURIComponent(detail)})` : "");
+      toast(msg, "error");
       router.replace("/settings");
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps

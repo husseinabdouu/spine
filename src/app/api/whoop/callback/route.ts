@@ -23,9 +23,15 @@ export async function GET(request: Request) {
 
   try {
     const redirectUri = `${appUrl}/api/whoop/callback`;
-    const tokens      = await exchangeWhoopCode(code, redirectUri);
+    console.log("[whoop/callback] Exchanging code, redirect_uri:", redirectUri);
+
+    const tokens = await exchangeWhoopCode(code, redirectUri);
+    console.log("[whoop/callback] Token exchange OK, fetching user profile");
+
     const whoopUserId = await getWhoopUserId(tokens.access_token);
-    const expiresAt   = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+    console.log("[whoop/callback] Whoop user_id:", whoopUserId);
+
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
     const supabase = createClient();
     const { error: dbError } = await supabase
@@ -44,9 +50,12 @@ export async function GET(request: Request) {
       );
 
     if (dbError) {
-      console.error("Whoop callback DB error:", dbError);
-      return NextResponse.redirect(`${appUrl}/settings?error=whoop_db_error`);
+      console.error("[whoop/callback] DB error:", dbError);
+      const detail = encodeURIComponent(dbError.message);
+      return NextResponse.redirect(`${appUrl}/settings?error=whoop_db_error&detail=${detail}`);
     }
+
+    console.log("[whoop/callback] Saved to DB, triggering initial sync");
 
     // Kick off an immediate sync for yesterday (fire-and-forget)
     const yesterday = new Date();
@@ -57,11 +66,13 @@ export async function GET(request: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, date: dateStr }),
-    }).catch((err) => console.error("Initial Whoop sync error:", err));
+    }).catch((err) => console.error("[whoop/callback] Initial sync error:", err));
 
     return NextResponse.redirect(`${appUrl}/settings?whoop=connected`);
   } catch (err) {
-    console.error("Whoop callback error:", err);
-    return NextResponse.redirect(`${appUrl}/settings?error=whoop_failed`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[whoop/callback] Error:", message);
+    const detail = encodeURIComponent(message.slice(0, 200));
+    return NextResponse.redirect(`${appUrl}/settings?error=whoop_failed&detail=${detail}`);
   }
 }
