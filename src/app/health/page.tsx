@@ -362,8 +362,142 @@ export default function HealthPage() {
               ))}
             </div>
 
-            {/* ── Tab bar ── */}
-            {health.length > 1 && (
+            {/* ── Today: full-day detail layout ── */}
+            {isToday && todayRow && (
+              <div className="space-y-4">
+                {/* Recovery */}
+                <div className={`${CARD} p-5`}>
+                  <p className="text-xs uppercase tracking-widest text-[var(--text-muted)] mb-4">Recovery</p>
+                  <div className="flex items-center gap-6 mb-5">
+                    {/* Big score ring */}
+                    <div className="relative w-20 h-20 shrink-0">
+                      <svg className="w-full h-full -rotate-90" viewBox="0 0 80 80">
+                        <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                        <circle
+                          cx="40" cy="40" r="32" fill="none"
+                          stroke={rColor(todayRow.whoop_recovery_score)}
+                          strokeWidth="8"
+                          strokeLinecap="round"
+                          strokeDasharray={`${2 * Math.PI * 32}`}
+                          strokeDashoffset={`${2 * Math.PI * 32 * (1 - (todayRow.whoop_recovery_score ?? 0) / 100)}`}
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-lg font-bold" style={{ color: rColor(todayRow.whoop_recovery_score) }}>
+                          {todayRow.whoop_recovery_score != null ? `${Math.round(todayRow.whoop_recovery_score)}` : "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-3 flex-1">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">HRV</p>
+                        <p className="text-xl font-bold text-[#818cf8]">{todayRow.hrv_avg != null ? `${Math.round(todayRow.hrv_avg)} ms` : "—"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Resting HR</p>
+                        <p className="text-xl font-bold text-[#f87171]">{todayRow.resting_heart_rate != null ? `${Math.round(todayRow.resting_heart_rate)} bpm` : "—"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Recovery %</p>
+                        <p className="text-sm font-semibold" style={{ color: rColor(todayRow.whoop_recovery_score) }}>
+                          {todayRow.whoop_recovery_score != null
+                            ? todayRow.whoop_recovery_score >= 67 ? "Optimal" : todayRow.whoop_recovery_score >= 34 ? "Moderate" : "Low"
+                            : "—"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  {/* HRV bar */}
+                  {todayRow.hrv_avg != null && (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
+                        <span>HRV</span><span>{Math.round(todayRow.hrv_avg)} ms</span>
+                      </div>
+                      <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-[#818cf8]" style={{ width: `${Math.min(100, (todayRow.hrv_avg / 120) * 100)}%` }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sleep */}
+                <div className={`${CARD} p-5`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-xs uppercase tracking-widest text-[var(--text-muted)]">Sleep</p>
+                    {todayRow.whoop_sleep_score != null && (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#38bdf8]/10 text-[#38bdf8]">
+                        {Math.round(todayRow.whoop_sleep_score)}% score
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Duration</p>
+                      <p className="text-2xl font-bold text-[#38bdf8]">{todayRow.sleep_hours != null ? `${todayRow.sleep_hours}h` : "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">REM</p>
+                      <p className="text-2xl font-bold text-[#a78bfa]">{todayRow.whoop_rem_mins != null ? `${todayRow.whoop_rem_mins}m` : "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Deep</p>
+                      <p className="text-2xl font-bold text-[#34d399]">{todayRow.whoop_deep_mins != null ? `${todayRow.whoop_deep_mins}m` : "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Light</p>
+                      <p className="text-2xl font-bold text-[#38bdf8]/70">{todayRow.whoop_light_mins != null ? `${todayRow.whoop_light_mins}m` : "—"}</p>
+                    </div>
+                  </div>
+                  {/* Sleep stage visual bar */}
+                  {(todayRow.whoop_rem_mins != null || todayRow.whoop_deep_mins != null || todayRow.whoop_light_mins != null) && (() => {
+                    const rem   = todayRow.whoop_rem_mins   ?? 0;
+                    const deep  = todayRow.whoop_deep_mins  ?? 0;
+                    const light = todayRow.whoop_light_mins ?? 0;
+                    const total = rem + deep + light;
+                    if (total === 0) return null;
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex h-4 rounded-full overflow-hidden gap-0.5">
+                          {rem   > 0 && <div className="h-full bg-[#a78bfa]" style={{ width: `${(rem   / total) * 100}%` }} />}
+                          {deep  > 0 && <div className="h-full bg-[#34d399]" style={{ width: `${(deep  / total) * 100}%` }} />}
+                          {light > 0 && <div className="h-full bg-[#38bdf8]/60" style={{ width: `${(light / total) * 100}%` }} />}
+                        </div>
+                        <div className="flex gap-4 text-[10px] text-[var(--text-muted)]">
+                          <span><span className="text-[#a78bfa]">■</span> REM {Math.round((rem / total) * 100)}%</span>
+                          <span><span className="text-[#34d399]">■</span> Deep {Math.round((deep / total) * 100)}%</span>
+                          <span><span className="text-[#38bdf8]/60">■</span> Light {Math.round((light / total) * 100)}%</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Activity */}
+                <div className={`${CARD} p-5`}>
+                  <p className="text-xs uppercase tracking-widest text-[var(--text-muted)] mb-4">Activity</p>
+                  <div className="grid grid-cols-2 gap-6">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Strain</p>
+                      <p className="text-3xl font-bold text-[#fb923c]">{todayRow.whoop_strain != null ? todayRow.whoop_strain.toFixed(1) : "—"}</p>
+                      {todayRow.whoop_strain != null && (
+                        <div className="mt-2 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-[#fb923c]" style={{ width: `${(todayRow.whoop_strain / 21) * 100}%` }} />
+                        </div>
+                      )}
+                      <p className="text-[10px] text-[var(--text-muted)] mt-1">out of 21</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Calories</p>
+                      <p className="text-3xl font-bold text-[#fbbf24]">{todayRow.whoop_calories != null ? `${todayRow.whoop_calories.toLocaleString()}` : "—"}</p>
+                      <p className="text-[10px] text-[var(--text-muted)] mt-1">kcal burned</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Tab bar (multi-day ranges only) ── */}
+            {!isToday && health.length > 1 && (
               <>
                 <div className="flex gap-1 border-b border-[var(--border)]">
                   {TABS.map(({ key, label }) => (
@@ -447,7 +581,8 @@ export default function HealthPage() {
               </>
             )}
 
-            {/* ── Day-by-day log ── */}
+            {/* ── Day-by-day log (multi-day only) ── */}
+            {!isToday && (
             <div className={`${CARD} overflow-hidden`}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
                 <h3 className="text-sm font-semibold text-[var(--text)]">Daily Log</h3>
@@ -556,6 +691,7 @@ export default function HealthPage() {
                 </div>
               )}
             </div>
+            )}
 
           </>
         )}
