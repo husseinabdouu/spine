@@ -160,6 +160,12 @@ export default function HealthPage() {
   const latest = health.at(-1) ?? null;
   const labels  = health.map(h => format(parseLocalDate(h.date), "MMM d"));
 
+  // Helper: average of non-null values
+  function avg(vals: (number | null)[]): number | null {
+    const v = vals.filter((x): x is number => x !== null);
+    return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
+  }
+
   // Daily spending totals keyed by date
   const spendByDate: Record<string, number> = {};
   for (const tx of spending) {
@@ -172,6 +178,14 @@ export default function HealthPage() {
   const hrvData      = health.map(h => h.hrv_avg);
   const sleepData    = health.map(h => h.sleep_hours);
   const strainData   = health.map(h => h.whoop_strain);
+
+  // Period averages (used in the metric cards)
+  const avgRecovery = avg(recoveryData);
+  const avgHrv      = avg(hrvData);
+  const avgSleep    = avg(sleepData);
+  const avgStrain   = avg(strainData);
+
+  const rangeLabelShort = range === "1" ? "today" : range === "7" ? "7d avg" : range === "all" ? "all-time avg" : `${range}d avg`;
 
   const recoveryTrend = trend(recoveryData);
   const hrvTrend      = trend(hrvData);
@@ -320,44 +334,48 @@ export default function HealthPage() {
           </div>
         ) : (
           <>
-            {/* ── Today's snapshot ── */}
+            {/* ── Metric cards ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {[
                 {
-                  label: "Recovery",
-                  value: latest?.whoop_recovery_score != null ? `${Math.round(latest.whoop_recovery_score)}%` : "—",
-                  sub:   latest?.whoop_recovery_score != null
-                    ? latest.whoop_recovery_score >= 67 ? "Green — ready" : latest.whoop_recovery_score >= 34 ? "Yellow — moderate" : "Red — rest"
-                    : "No data",
-                  color: recoveryColor(latest?.whoop_recovery_score ?? null),
-                  Icon:  Activity,
-                  trend: recoveryTrend,
+                  label:   "Recovery",
+                  primary: avgRecovery != null ? `${Math.round(avgRecovery)}%` : "—",
+                  latest:  latest?.whoop_recovery_score != null ? `${Math.round(latest.whoop_recovery_score)}%` : null,
+                  sub:     avgRecovery != null
+                    ? avgRecovery >= 67 ? "Green zone" : avgRecovery >= 34 ? "Yellow zone" : "Red zone"
+                    : "No scored data yet",
+                  color:   recoveryColor(avgRecovery),
+                  Icon:    Activity,
+                  trend:   recoveryTrend,
                 },
                 {
-                  label: "HRV",
-                  value: latest?.hrv_avg != null ? `${Math.round(latest.hrv_avg)} ms` : "—",
-                  sub:   "avg heart rate variability",
-                  color: "#818cf8",
-                  Icon:  Heart,
-                  trend: hrvTrend,
+                  label:   "HRV",
+                  primary: avgHrv != null ? `${Math.round(avgHrv)} ms` : "—",
+                  latest:  latest?.hrv_avg != null ? `${Math.round(latest.hrv_avg)} ms` : null,
+                  sub:     "heart rate variability",
+                  color:   "#818cf8",
+                  Icon:    Heart,
+                  trend:   hrvTrend,
                 },
                 {
-                  label: "Sleep",
-                  value: latest?.sleep_hours != null ? `${latest.sleep_hours}h` : "—",
-                  sub:   latest?.whoop_sleep_score != null ? `${Math.round(latest.whoop_sleep_score)}% performance` : "last night",
-                  color: "#38bdf8",
-                  Icon:  Moon,
-                  trend: sleepTrend,
+                  label:   "Sleep",
+                  primary: avgSleep != null ? `${avgSleep}h` : "—",
+                  latest:  latest?.sleep_hours != null ? `${latest.sleep_hours}h` : null,
+                  sub:     latest?.whoop_sleep_score != null ? `latest: ${Math.round(latest.whoop_sleep_score)}% perf` : "sleep duration",
+                  color:   "#38bdf8",
+                  Icon:    Moon,
+                  trend:   sleepTrend,
                 },
                 {
-                  label: "Strain",
-                  value: latest?.whoop_strain != null ? latest.whoop_strain.toFixed(1) : "—",
-                  sub:   "day strain score",
-                  color: "#fb923c",
-                  Icon:  Zap,
-                  trend: strainTrend,
+                  label:   "Strain",
+                  primary: avgStrain != null ? avgStrain.toFixed(1) : "—",
+                  latest:  latest?.whoop_strain != null ? latest.whoop_strain.toFixed(1) : null,
+                  sub:     "day strain score",
+                  color:   "#fb923c",
+                  Icon:    Zap,
+                  trend:   strainTrend,
                 },
-              ].map(({ label, value, sub, color, Icon, trend: t }) => (
+              ].map(({ label, primary, latest: latestVal, sub, color, Icon, trend: t }) => (
                 <div key={label} className={`${CARD} p-4`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -366,7 +384,11 @@ export default function HealthPage() {
                     </div>
                     <TrendIcon dir={t} />
                   </div>
-                  <div className="text-2xl font-bold text-white" style={{ color }}>{value}</div>
+                  <div className="text-2xl font-bold" style={{ color }}>{primary}</div>
+                  <div className="text-[10px] text-[var(--text-muted)] mt-0.5 uppercase tracking-wider">{rangeLabelShort}</div>
+                  {latestVal && range !== "1" && (
+                    <div className="text-xs text-[var(--text-dim)] mt-1">latest: {latestVal}</div>
+                  )}
                   <div className="text-xs text-[var(--text-muted)] mt-0.5">{sub}</div>
                 </div>
               ))}
