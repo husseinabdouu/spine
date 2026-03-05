@@ -301,14 +301,19 @@ function SettingsPageInner() {
   }
 
   async function disconnectWhoop() {
+    if (!userId) return;
     setDisconnectingWhoop(true);
     try {
-      const { error } = await supabase.from("whoop_connections").delete().neq("id", "");
+      const { error } = await supabase
+        .from("whoop_connections")
+        .delete()
+        .eq("user_id", userId);
       if (error) throw error;
       setWhoopConn(null);
       toast("Whoop disconnected", "info");
-    } catch {
-      toast("Failed to disconnect Whoop", "error");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast(`Failed to disconnect Whoop: ${msg}`, "error");
     }
     setDisconnectingWhoop(false);
   }
