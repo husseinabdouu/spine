@@ -1,13 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import PlaidLink from "@/components/PlaidLink";
+import AppShell from "@/components/AppShell";
+import { useToast } from "@/components/Toast";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Tooltip,
+  Legend,
+} from "chart.js";
+import { Bar, Doughnut } from "react-chartjs-2";
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
+import { format, subDays } from "date-fns";
+import { parseLocalDate } from "@/lib/dateUtils";
+import { ArrowLeftRight, CreditCard, Activity, Moon, Heart } from "lucide-react";
 
 type Transaction = {
   amount_cents: number;
   posted_at: string;
+  category: string | null;
 };
 
 type PlaidItem = {
@@ -43,13 +62,15 @@ type BehavioralInsight = {
 };
 
 export default function DashboardPage() {
+  const { toast } = useToast();
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [weeklySpend, setWeeklySpend] = useState(0);
   const [plaidItems, setPlaidItems] = useState<PlaidItem[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [healthData, setHealthData] = useState<HealthData | null>(null);
   const [behavioralInsight, setBehavioralInsight] =
     useState<BehavioralInsight | null>(null);
@@ -68,32 +89,75 @@ export default function DashboardPage() {
     }
 
     setUserEmail(data.session.user.email || null);
-    loadDashboardData();
-    loadPlaidItems();
-    loadHealthData();
-    loadBehavioralInsights();
+    setAuthChecked(true);
+
+    Promise.all([
+      loadDashboardData(),
+      loadPlaidItems(),
+      loadHealthData(),
+      loadBehavioralInsights(),
+    ]);
   }
 
   async function loadDashboardData() {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const dateStr = sevenDaysAgo.toISOString().split("T")[0];
+    const thirtyDaysAgo = subDays(new Date(), 30);
+    const dateStr = thirtyDaysAgo.toISOString().split("T")[0];
 
     const { data, error } = await supabase
       .from("transactions")
-      .select("amount_cents, posted_at")
+      .select("amount_cents, posted_at, category")
       .gte("posted_at", dateStr)
       .order("posted_at", { ascending: false });
 
     if (!error && data) {
       setTransactions(data);
-
-      const total = data.reduce((sum, t) => sum + (t.amount_cents || 0), 0);
+      const last7 = data.filter(
+        (t) => t.posted_at >= subDays(new Date(), 7).toISOString().split("T")[0]
+      );
+      const total = last7.reduce((sum, t) => sum + Math.abs(t.amount_cents || 0), 0);
       setWeeklySpend(total / 100);
     }
-
-    setLoading(false);
   }
+
+  const chartData = useMemo(() => {
+    const sevenDaysAgo = subDays(new Date(), 7);
+    const dateStr = sevenDaysAgo.toISOString().split("T")[0];
+    const last7 = transactions.filter((t) => t.posted_at >= dateStr);
+    const byDay: Record<string, number> = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = subDays(new Date(), i);
+      const ds = format(d, "yyyy-MM-dd");
+      byDay[ds] = 0;
+    }
+    last7.forEach((t) => {
+      const ds = String(t.posted_at).slice(0, 10);
+      if (ds in byDay) byDay[ds] += Math.abs(t.amount_cents || 0) / 100;
+    });
+    return Object.entries(byDay).map(([date, spend]) => ({
+      date,
+      spend,
+      label: format(parseLocalDate(date), "EEE"),
+    }));
+  }, [transactions]);
+
+  const categoryData = useMemo(() => {
+    const sevenDaysAgo = subDays(new Date(), 7);
+    const dateStr = sevenDaysAgo.toISOString().split("T")[0];
+    const last7 = transactions.filter((t) => t.posted_at >= dateStr);
+    const byCat: Record<string, number> = {};
+    last7.forEach((t) => {
+      const cat = t.category || "Uncategorized";
+      byCat[cat] = (byCat[cat] || 0) + Math.abs(t.amount_cents || 0) / 100;
+    });
+    return Object.entries(byCat)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [transactions]);
+
+  const CHART_COLORS = [
+    "#C9A84C", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4",
+  ];
 
   async function loadPlaidItems() {
     const { data, error } = await supabase
@@ -141,7 +205,7 @@ export default function DashboardPage() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        alert("Not logged in");
+        toast("Not logged in", "error");
         setCalculating(false);
         return;
       }
@@ -155,14 +219,14 @@ export default function DashboardPage() {
       const data = await response.json();
 
       if (data.success) {
-        alert("Behavioral risk calculated successfully!");
+        toast("Behavioral risk calculated successfully!", "success");
         loadBehavioralInsights();
       } else {
-        alert("Error: " + data.error);
+        toast("Error: " + data.error, "error");
       }
     } catch (error) {
       console.error("Calculate error:", error);
-      alert("Failed to calculate behavioral risk");
+      toast("Failed to calculate behavioral risk", "error");
     }
 
     setCalculating(false);
@@ -177,7 +241,7 @@ export default function DashboardPage() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        alert("Not logged in");
+        toast("Not logged in", "error");
         setSyncing(false);
         return;
       }
@@ -185,29 +249,59 @@ export default function DashboardPage() {
       const response = await fetch("/api/plaid/sync-transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user.id }),
+        body: JSON.stringify({
+          user_id: user.id,
+          force_resync: transactions.length === 0,
+        }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        alert(`Synced! Added ${data.transactions_added} new transactions.`);
+        const msg =
+          data.transactions_added > 0
+            ? `Synced! Added ${data.transactions_added} new transactions.`
+            : "Synced. No new transactions yet. Plaid may still be fetching your history — try again in a few minutes.";
+        toast(msg, "success");
         loadDashboardData();
       } else {
-        alert("Error syncing transactions: " + data.error);
+        toast("Error syncing transactions: " + data.error, "error");
       }
     } catch (error) {
       console.error("Sync error:", error);
-      alert("Failed to sync transactions");
+      toast("Failed to sync transactions", "error");
     }
 
     setSyncing(false);
   }
 
   function handlePlaidSuccess() {
-    alert("Bank connected successfully!");
+    toast("Bank connected! Fetching your full transaction history…", "success");
     loadPlaidItems();
     syncTransactions();
+  }
+
+  async function disconnectBank(itemId: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setDisconnecting(itemId);
+    try {
+      const res = await fetch("/api/plaid/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, item_id: itemId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast("Bank disconnected. Your transaction history is still saved.", "info");
+        loadPlaidItems();
+      } else {
+        toast(data.error || "Failed to disconnect bank", "error");
+      }
+    } catch {
+      toast("Failed to disconnect bank", "error");
+    }
+    setDisconnecting(null);
   }
 
   async function logout() {
@@ -227,337 +321,241 @@ export default function DashboardPage() {
     return "HIGH";
   }
 
-  if (loading) {
-    return <div style={{ padding: 24 }}>Loading dashboard...</div>;
+  if (!authChecked) {
+    return (
+      <AppShell userEmail={null} onLogout={undefined}>
+        <div className="flex items-center justify-center min-h-[200px]">
+          <div className="animate-pulse text-[var(--text-dim)]">Loading...</div>
+        </div>
+      </AppShell>
+    );
   }
 
   return (
-    <main
-      style={{
-        padding: 24,
-        fontFamily: "system-ui",
-        maxWidth: 900,
-        margin: "0 auto",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <h1>Spine Dashboard</h1>
-        <div>
-          <span style={{ marginRight: 20 }}>{userEmail}</span>
-          <button onClick={logout}>Logout</button>
-        </div>
-      </div>
-
-      <nav style={{ marginTop: 20, marginBottom: 30 }}>
-        <a href="/dashboard" style={{ marginRight: 20 }}>
-          Dashboard
-        </a>
-        <a href="/transactions" style={{ marginRight: 20 }}>
-          Transactions
-        </a>
-        <a href="/insights" style={{ marginRight: 20 }}>
-          Insights
-        </a>
-        <a href="/settings">Settings</a>
-      </nav>
-
+    <AppShell userEmail={userEmail} onLogout={logout}>
       {/* Bank Connection Section */}
-      <div
-        style={{
-          padding: 20,
-          background: "#f0f9ff",
-          borderRadius: 8,
-          marginBottom: 30,
-        }}
-      >
-        <h3 style={{ margin: 0, marginBottom: 15, color: "#1a1a1a" }}>
-          Bank Connections
-        </h3>
-
-        {plaidItems.length === 0 ? (
-          <div>
-            <p style={{ marginBottom: 15, color: "#666" }}>
-              No banks connected yet. Connect your bank to auto-sync
-              transactions.
-            </p>
-            <PlaidLink onSuccess={handlePlaidSuccess} />
-          </div>
-        ) : (
-          <div>
-            {plaidItems.map((item) => (
-              <div key={item.id} style={{ marginBottom: 10 }}>
-                <span style={{ color: "#1a1a1a" }}>
-                  🏦 {item.institution_name}
-                </span>
-              </div>
-            ))}
-            <div style={{ marginTop: 15, display: "flex", gap: 10 }}>
-              <button
-                onClick={syncTransactions}
-                disabled={syncing}
-                style={{
-                  padding: "12px 24px",
-                  fontSize: 16,
-                  cursor: syncing ? "not-allowed" : "pointer",
-                  backgroundColor: "#10b981",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: 8,
-                }}
-              >
-                {syncing ? "Syncing..." : "Sync Transactions"}
-              </button>
+      <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 mb-6 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+          <h3 className="text-sm font-medium text-[var(--text-dim)] mb-3">Bank Connections</h3>
+          {plaidItems.length === 0 ? (
+            <div>
+              <p className="text-[var(--text-dim)] mb-4">Connect your bank to sync transactions.</p>
               <PlaidLink onSuccess={handlePlaidSuccess} />
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* Behavioral Insights Section */}
-      {behavioralInsight ? (
-        <div
-          style={{
-            padding: 30,
-            background: "#fef3c7",
-            borderRadius: 8,
-            marginBottom: 30,
-            border: `3px solid ${getRiskColor(behavioralInsight.risk_score)}`,
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 15,
-            }}
-          >
-            <h2 style={{ margin: 0, color: "#1a1a1a" }}>
-              Behavioral Risk Score
-            </h2>
-            <button
-              onClick={calculateBehavioralRisk}
-              disabled={calculating}
-              style={{
-                padding: "8px 16px",
-                fontSize: 14,
-                cursor: calculating ? "not-allowed" : "pointer",
-                backgroundColor: "#6366f1",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: 6,
-              }}
-            >
-              {calculating ? "Calculating..." : "Recalculate"}
-            </button>
-          </div>
-
-          <div
-            style={{
-              fontSize: 64,
-              fontWeight: "bold",
-              color: getRiskColor(behavioralInsight.risk_score),
-              marginBottom: 10,
-            }}
-          >
-            {behavioralInsight.risk_score}
-            <span style={{ fontSize: 24, marginLeft: 10 }}>
-              {getRiskLevel(behavioralInsight.risk_score)}
-            </span>
-          </div>
-
-          <div style={{ marginTop: 20 }}>
-            <h4 style={{ margin: 0, marginBottom: 10, color: "#1a1a1a" }}>
-              Insights:
-            </h4>
-            <ul style={{ margin: 0, paddingLeft: 20, color: "#1a1a1a" }}>
-              {behavioralInsight.insights.map((insight, idx) => (
-                <li key={idx} style={{ marginBottom: 8 }}>
-                  {insight}
-                </li>
+          ) : (
+            <div className="space-y-3">
+              {plaidItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between bg-white/[0.03] border border-[var(--border)] rounded-lg px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-[var(--safe-dim)] flex items-center justify-center">
+                      <CreditCard className="w-4 h-4 text-[var(--safe)]" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-[var(--text)]">{item.institution_name}</div>
+                      <div className="text-xs text-[var(--text-muted)]">Connected</div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => disconnectBank(item.id)}
+                    disabled={disconnecting === item.id}
+                    className="text-xs text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors disabled:opacity-50 px-2 py-1"
+                  >
+                    {disconnecting === item.id ? "Removing…" : "Disconnect"}
+                  </button>
+                </div>
               ))}
-            </ul>
-          </div>
-
-          <div style={{ marginTop: 20, fontSize: 12, color: "#666" }}>
-            <strong>7-Day Averages:</strong> Sleep:{" "}
-            {behavioralInsight.health_summary.avg_sleep}hrs | HRV:{" "}
-            {behavioralInsight.health_summary.avg_hrv}ms | Activity:{" "}
-            {behavioralInsight.health_summary.avg_activity}
-          </div>
-
-          <div style={{ marginTop: 5, fontSize: 12, color: "#666" }}>
-            <strong>Spending Trend:</strong> This week: $
-            {behavioralInsight.spending_summary.last_7_days} | Last week: $
-            {behavioralInsight.spending_summary.prev_7_days} | Change:{" "}
-            {behavioralInsight.spending_summary.change_percent}%
-          </div>
-
-          <p style={{ margin: 0, marginTop: 15, fontSize: 12, color: "#666" }}>
-            Last calculated:{" "}
-            {new Date(behavioralInsight.date).toLocaleDateString()}
-          </p>
-        </div>
-      ) : (
-        <div
-          style={{
-            padding: 30,
-            background: "#f3f4f6",
-            borderRadius: 8,
-            marginBottom: 30,
-            textAlign: "center",
-          }}
-        >
-          <h2 style={{ margin: 0, marginBottom: 10, color: "#1a1a1a" }}>
-            Behavioral Risk Score
-          </h2>
-          <p style={{ color: "#666", marginBottom: 20 }}>
-            Calculate your behavioral risk score based on health and spending
-            patterns.
-          </p>
-          <button
-            onClick={calculateBehavioralRisk}
-            disabled={calculating}
-            style={{
-              padding: "12px 24px",
-              fontSize: 16,
-              cursor: calculating ? "not-allowed" : "pointer",
-              backgroundColor: "#6366f1",
-              color: "#ffffff",
-              border: "none",
-              borderRadius: 8,
-            }}
-          >
-            {calculating ? "Calculating..." : "Calculate Behavioral Risk"}
-          </button>
-          <p style={{ fontSize: 12, color: "#999", marginTop: 10 }}>
-            Requires at least 3 days of health data and transaction history
-          </p>
-        </div>
-      )}
-
-      {/* Health Metrics Section */}
-      <div
-        style={{
-          padding: 30,
-          background: "#f5f5f5",
-          borderRadius: 8,
-          marginBottom: 30,
-        }}
-      >
-        <h2 style={{ margin: 0, marginBottom: 10, color: "#1a1a1a" }}>
-          Today's Health
-        </h2>
-
-        {healthData ? (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ display: "flex", gap: 30, flexWrap: "wrap" }}>
-              {healthData.sleep_hours !== null && (
-                <div>
-                  <div style={{ fontSize: 14, color: "#666" }}>Sleep</div>
-                  <div
-                    style={{
-                      fontSize: 24,
-                      fontWeight: "bold",
-                      color: "#1a1a1a",
-                    }}
-                  >
-                    {healthData.sleep_hours.toFixed(1)} hrs
-                  </div>
-                </div>
-              )}
-              {healthData.hrv_avg !== null && (
-                <div>
-                  <div style={{ fontSize: 14, color: "#666" }}>HRV</div>
-                  <div
-                    style={{
-                      fontSize: 24,
-                      fontWeight: "bold",
-                      color: "#1a1a1a",
-                    }}
-                  >
-                    {healthData.hrv_avg} ms
-                  </div>
-                </div>
-              )}
-              {healthData.active_energy !== null && (
-                <div>
-                  <div style={{ fontSize: 14, color: "#666" }}>Activity</div>
-                  <div
-                    style={{
-                      fontSize: 24,
-                      fontWeight: "bold",
-                      color: "#1a1a1a",
-                    }}
-                  >
-                    {healthData.active_energy.toLocaleString()}
-                  </div>
-                </div>
-              )}
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  onClick={syncTransactions}
+                  disabled={syncing}
+                  className="px-4 py-2 bg-[var(--gold)] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-[#080808] rounded-lg text-sm font-bold transition-colors"
+                >
+                  {syncing ? "Syncing…" : "Sync Transactions"}
+                </button>
+                <PlaidLink onSuccess={handlePlaidSuccess} />
+              </div>
             </div>
-            <p
-              style={{ margin: 0, marginTop: 15, fontSize: 12, color: "#666" }}
+          )}
+        </div>
+
+      {/* Risk + Health + Spending row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        {/* Behavioral Risk */}
+        <div
+          className={`rounded-xl p-5 border bg-[var(--glass-bg)] border-[var(--glass-border)] backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] ${
+            behavioralInsight ? "" : ""
+          }`}
+            style={
+              behavioralInsight
+                ? { borderLeftWidth: 4, borderLeftColor: getRiskColor(behavioralInsight.risk_score) }
+                : undefined
+            }
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-zinc-400">Behavioral Risk</h3>
+              <button
+                onClick={calculateBehavioralRisk}
+                disabled={calculating}
+                className="text-xs px-3 py-1.5 bg-[var(--gold)] hover:opacity-90 disabled:opacity-50 text-[#080808] font-semibold rounded-lg transition-colors"
+              >
+                {calculating ? "..." : "Recalculate"}
+              </button>
+            </div>
+            {behavioralInsight ? (
+              <>
+                <div
+                  className="text-4xl font-bold"
+                  style={{ color: getRiskColor(behavioralInsight.risk_score) }}
+                >
+                  {behavioralInsight.risk_score}
+                  <span className="text-lg font-normal ml-2 text-[var(--text-dim)]">
+                    {getRiskLevel(behavioralInsight.risk_score)}
+                  </span>
+                </div>
+                <ul className="mt-3 space-y-1 text-sm text-[var(--text-dim)]">
+                  {behavioralInsight.insights.slice(0, 2).map((insight, idx) => (
+                    <li key={idx}>• {insight}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="text-[var(--text-muted)] text-sm">Calculate to see your risk score.</p>
+            )}
+          </div>
+
+        {/* Health */}
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+            <h3 className="text-sm font-medium text-[var(--text-dim)] mb-3">Today&apos;s Health</h3>
+            {healthData ? (
+              <div className="space-y-3">
+                {healthData.sleep_hours != null && (
+                  <div className="flex items-center gap-2">
+                    <Moon className="w-4 h-4 text-[var(--text-muted)]" />
+                    <span className="text-white font-medium">{healthData.sleep_hours.toFixed(1)}h</span>
+                    <span className="text-zinc-500 text-sm">sleep</span>
+                  </div>
+                )}
+                {healthData.hrv_avg != null && (
+                  <div className="flex items-center gap-2">
+                    <Heart className="w-4 h-4 text-[var(--text-muted)]" />
+                    <span className="text-white font-medium">{healthData.hrv_avg}ms</span>
+                    <span className="text-[var(--text-muted)] text-sm">HRV</span>
+                  </div>
+                )}
+                {healthData.active_energy != null && (
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-[var(--text-muted)]" />
+                    <span className="text-white font-medium">{healthData.active_energy.toLocaleString()}</span>
+                    <span className="text-[var(--text-muted)] text-sm">activity</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-[var(--text-muted)] text-sm">Sync health data via iOS Shortcut.</p>
+            )}
+          </div>
+
+        {/* Weekly Spend */}
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+            <h3 className="text-sm font-medium text-[var(--text-dim)] mb-3">This Week</h3>
+            <div className="text-3xl font-bold text-white">
+              ${weeklySpend.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            </div>
+            <p className="text-[var(--text-muted)] text-sm mt-1">{transactions.filter((t) => t.posted_at >= subDays(new Date(), 7).toISOString().split("T")[0]).length} transactions</p>
+            <Link
+              href="/transactions"
+              className="inline-flex items-center gap-1 text-[var(--gold)] hover:opacity-90 text-sm mt-2"
             >
-              Last updated: {new Date(healthData.date).toLocaleDateString()}
+              View all <ArrowLeftRight className="w-3 h-3" />
+            </Link>
+          </div>
+        </div>
+
+      {/* Charts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+            <h3 className="text-sm font-medium text-[var(--text-dim)] mb-4">7-day spending</h3>
+            {chartData.some((d) => d.spend > 0) ? (
+              <div className="h-48">
+                <Bar
+                  data={{
+                    labels: chartData.map((d) => d.label),
+                    datasets: [{
+                      data: chartData.map((d) => d.spend),
+                      backgroundColor: "#C9A84C",
+                      borderRadius: 4,
+                      borderSkipped: false,
+                    }],
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `$${(ctx.parsed.y ?? 0).toFixed(2)}` } } },
+                    scales: {
+                      x: { grid: { display: false }, ticks: { color: "#71717a", font: { size: 11 } }, border: { display: false } },
+                      y: { grid: { color: "rgba(255,255,255,0.05)" }, ticks: { color: "#71717a", font: { size: 11 }, callback: (v) => `$${v}` }, border: { display: false } },
+                    },
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-[var(--text-muted)] text-sm">No spending data yet</div>
+            )}
+          </div>
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+            <h3 className="text-sm font-medium text-[var(--text-dim)] mb-4">Spending by category</h3>
+            {categoryData.length > 0 ? (
+              <div className="h-48">
+                <Doughnut
+                  data={{
+                    labels: categoryData.map((d) => d.name),
+                    datasets: [{
+                      data: categoryData.map((d) => d.value),
+                      backgroundColor: CHART_COLORS,
+                      borderWidth: 0,
+                      hoverOffset: 4,
+                    }],
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: "55%",
+                    plugins: {
+                      legend: { display: false },
+                      tooltip: { callbacks: { label: (ctx) => ` $${(ctx.parsed ?? 0).toFixed(2)}` } },
+                    },
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-[var(--text-muted)] text-sm">No category data yet</div>
+            )}
+          </div>
+        </div>
+
+      {/* Net worth placeholder + setup */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-[var(--glass-bg)] border border-dashed border-[var(--glass-border)] rounded-xl p-6 flex flex-col items-center justify-center min-h-[120px]">
+            <h3 className="text-sm font-medium text-[var(--text-muted)] mb-2">Net worth</h3>
+            <p className="text-[var(--text-muted)] text-sm text-center">
+              Coming soon. Requires Plaid Balance product.
             </p>
           </div>
-        ) : (
-          <p style={{ margin: 0, marginTop: 10, color: "#666" }}>
-            No health data yet. Run your iOS Shortcut to sync health data.
-          </p>
-        )}
-      </div>
-
-      <div
-        style={{
-          padding: 20,
-          background: "#fafafa",
-          borderRadius: 8,
-        }}
-      >
-        <h3 style={{ color: "#1a1a1a" }}>This Week's Spending</h3>
-        <div style={{ fontSize: 32, fontWeight: "bold", color: "#1a1a1a" }}>
-          ${weeklySpend.toFixed(2)}
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+            <h3 className="text-sm font-medium text-[var(--text-dim)] mb-3">Setup</h3>
+            <ul className="space-y-2 text-sm">
+              <li className={plaidItems.length > 0 ? "text-[var(--safe)]" : "text-[var(--text-muted)]"}>
+                {plaidItems.length > 0 ? "✓" : "○"} Bank connected
+              </li>
+              <li className={healthData ? "text-[var(--safe)]" : "text-[var(--text-muted)]"}>
+                {healthData ? "✓" : "○"} Health data synced
+              </li>
+              <li className={behavioralInsight ? "text-[var(--safe)]" : "text-[var(--text-muted)]"}>
+                {behavioralInsight ? "✓" : "○"} Behavioral risk calculated
+              </li>
+              <li className="text-[var(--text-muted)]">○ Use app 14 days to refine</li>
+            </ul>
+          </div>
         </div>
-        <p style={{ color: "#666", fontSize: 14 }}>
-          {transactions.length} transactions in last 7 days
-        </p>
-      </div>
-
-      <div
-        style={{
-          marginTop: 30,
-          padding: 20,
-          background: "#fff3cd",
-          borderRadius: 8,
-        }}
-      >
-        <h3 style={{ color: "#856404" }}>⚠️ Setup Progress:</h3>
-        <ol style={{ color: "#856404" }}>
-          <li>
-            {plaidItems.length > 0
-              ? "✅ Bank connected!"
-              : "Connect your bank account"}
-          </li>
-          <li>
-            {healthData
-              ? "✅ Health data synced!"
-              : "Run iOS Shortcut to sync health data"}
-          </li>
-          <li>
-            {behavioralInsight
-              ? "✅ Behavioral insights active!"
-              : "Calculate behavioral risk score"}
-          </li>
-          <li>Use app for 14 days to refine predictions</li>
-        </ol>
-      </div>
-    </main>
+    </AppShell>
   );
 }

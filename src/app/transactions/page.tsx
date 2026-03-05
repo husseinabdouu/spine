@@ -1,447 +1,481 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import AppShell from "@/components/AppShell";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Tooltip,
+  Legend,
+} from "chart.js";
+import { Bar, Doughnut } from "react-chartjs-2";
+import { format, subDays } from "date-fns";
+import { parseLocalDate } from "@/lib/dateUtils";
+import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, TrendingUp } from "lucide-react";
+import {
+  USER_CATEGORIES,
+  INCOME_CATEGORIES,
+  CATEGORY_COLORS,
+  resolveCategory,
+} from "@/lib/categorize";
 
-type Category = {
-  id: string;
-  name: string;
-};
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
 type Transaction = {
   id: string;
-  description: string;
+  merchant_name: string | null;
+  description: string | null;
   amount_cents: number;
   posted_at: string;
-  category_id: string | null;
-  categories: { name: string } | null;
+  category: string | null;
 };
 
+type AddForm = {
+  type: "expense" | "income";
+  date: string;
+  amount: string;
+  merchant: string;
+  category: string;
+};
+
+const INPUT_CLS =
+  "w-full px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--gold)]/50 text-sm";
+
 export default function TransactionsPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
+  const router = useRouter();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [postedAt, setPostedAt] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDescription, setEditDescription] = useState("");
-  const [editAmount, setEditAmount] = useState("");
-  const [editPostedAt, setEditPostedAt] = useState("");
-  const [isAdding, setIsAdding] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const MAX_ABS_AMOUNT = 1000000000; // $1,000,000,000
-
-  async function loadCategories() {
-    const { data, error } = await supabase
-      .from("categories")
-      .select("id, name")
-      .order("name");
-
-    if (!error && data) setCategories(data);
-  }
-
-  async function loadTransactions() {
-    const { data, error } = await supabase
-      .from("transactions")
-      .select(
-        `
-        id,
-        description,
-        amount_cents,
-        posted_at,
-        category_id,
-        categories(name)
-      `,
-      )
-      .order("posted_at", { ascending: false })
-      .order("id", { ascending: false });
-
-    if (!error && data) {
-      const typed = data as unknown as Transaction[];
-      setTransactions(typed);
-
-      // If currently editing a transaction that no longer exists, exit edit mode
-      if (editingId && !typed.some((t) => t.id === editingId)) {
-        cancelEdit();
-      }
-    }
-  }
-
-  // ✅ DELETE (must NOT be nested inside addTransaction)
-  async function deleteTransaction(id: string) {
-    setMessage(null);
-
-    const { error } = await supabase.from("transactions").delete().eq("id", id);
-
-    if (error) {
-      setMessage("Error deleting: " + error.message);
-      return;
-    }
-
-    setMessage("🗑️ Transaction deleted");
-    loadTransactions();
-  }
-
-  // ✅ UPDATE CATEGORY (must NOT be nested inside addTransaction)
-  async function updateTransactionCategory(id: string, newCategoryId: string) {
-    setMessage(null);
-
-    const { error } = await supabase
-      .from("transactions")
-      .update({ category_id: newCategoryId || null })
-      .eq("id", id);
-
-    if (error) {
-      setMessage("Error updating category: " + error.message);
-      return;
-    }
-
-    setMessage("✅ Category updated");
-    loadTransactions();
-  }
-  function startEdit(t: Transaction) {
-    setEditingId(t.id);
-    setEditDescription(t.description ?? "");
-    setEditAmount(((t.amount_cents ?? 0) / 100).toFixed(2));
-    setEditPostedAt(t.posted_at ? String(t.posted_at).slice(0, 10) : "");
-    setMessage(null);
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditDescription("");
-    setEditAmount("");
-    setEditPostedAt("");
-    setMessage(null);
-  }
-
-  async function saveEdit(id: string) {
-    setMessage(null);
-
-    if (savingId === id) return;
-    setSavingId(id);
-
-    if (!editDescription || !editAmount || !editPostedAt) {
-      setMessage("All fields required");
-      setSavingId(null);
-      return;
-    }
-
-    const parsed = Number(editAmount);
-
-    if (!Number.isFinite(parsed)) {
-      setMessage("Amount must be a valid number");
-      setSavingId(null);
-      return;
-    }
-
-    if (parsed === 0) {
-      setMessage("Amount cannot be 0");
-      setSavingId(null);
-      return;
-    }
-
-    if (Math.abs(parsed) > MAX_ABS_AMOUNT) {
-      setMessage(
-        `Amount seems too large (max $${MAX_ABS_AMOUNT.toLocaleString()})`,
-      );
-      setSavingId(null);
-      return;
-    }
-
-    const amountCents = Math.round(parsed * 100);
-
-    const { error } = await supabase
-      .from("transactions")
-      .update({
-        description: editDescription,
-        amount_cents: amountCents,
-        posted_at: editPostedAt,
-      })
-      .eq("id", id);
-
-    if (error) {
-      setMessage("Error updating: " + error.message);
-      setSavingId(null);
-      return;
-    }
-
-    setMessage("✅ Transaction updated");
-    setSavingId(null);
-    cancelEdit();
-    loadTransactions();
-  }
-
-  async function addTransaction() {
-    setMessage(null);
-
-    if (isAdding) return;
-    setIsAdding(true);
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    const user = sessionData.session?.user;
-
-    if (!user) {
-      setMessage("Not logged in");
-      setIsAdding(false);
-      return;
-    }
-
-    if (!description || !amount || !postedAt || !categoryId) {
-      setMessage("All fields required");
-      setIsAdding(false);
-      return;
-    }
-
-    const parsed = Number(amount);
-
-    if (!Number.isFinite(parsed)) {
-      setMessage("Amount must be a valid number");
-      setIsAdding(false);
-      return;
-    }
-
-    if (parsed === 0) {
-      setMessage("Amount cannot be 0");
-      setIsAdding(false);
-      return;
-    }
-
-    if (Math.abs(parsed) > MAX_ABS_AMOUNT) {
-      setMessage(
-        `Amount seems too large (max $${MAX_ABS_AMOUNT.toLocaleString()})`,
-      );
-      setIsAdding(false);
-      return;
-    }
-
-    const amountCents = Math.round(parsed * 100);
-
-    const { error } = await supabase.from("transactions").insert({
-      user_id: user.id,
-      description,
-      amount_cents: amountCents,
-      posted_at: postedAt,
-      category_id: categoryId,
-      source: "manual",
-    });
-
-    if (error) {
-      setMessage("Error: " + error.message);
-      setIsAdding(false);
-      return;
-    }
-
-    setDescription("");
-    setAmount("");
-    setPostedAt("");
-    setCategoryId("");
-    setMessage("✅ Transaction added");
-    setIsAdding(false);
-
-    loadTransactions();
-  }
+  const [loading, setLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<"7" | "30" | "90" | "all">("90");
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState<"spending" | "income">("spending");
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [addForm, setAddForm] = useState<AddForm>({
+    type: "expense",
+    date: format(new Date(), "yyyy-MM-dd"),
+    amount: "",
+    merchant: "",
+    category: "Food & Drink",
+  });
 
   useEffect(() => {
-    loadCategories();
-    loadTransactions();
+    checkAuth();
   }, []);
 
+  async function checkAuth() {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) { router.push("/setup"); return; }
+    setUserEmail(data.session.user.email || null);
+    setUserId(data.session.user.id);
+    loadTransactions();
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+    router.push("/setup");
+  }
+
+  const loadTransactions = useCallback(async () => {
+    setLoading(true);
+    let query = supabase
+      .from("transactions")
+      .select("id, merchant_name, description, amount_cents, posted_at, category")
+      .order("posted_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(10000);
+
+    if (dateRange !== "all") {
+      const dateStr = subDays(new Date(), parseInt(dateRange)).toISOString().split("T")[0];
+      query = query.gte("posted_at", dateStr);
+    }
+
+    const { data, error } = await query;
+    if (!error && data) setTransactions(data as Transaction[]);
+    setLoading(false);
+  }, [dateRange]);
+
+  useEffect(() => { loadTransactions(); }, [loadTransactions]);
+
+  const updateCategory = useCallback(async (id: string, newCat: string) => {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, category: newCat } : t));
+    const { error } = await supabase.from("transactions").update({ category: newCat }).eq("id", id);
+    if (error) {
+      console.error("Category update failed:", error);
+      loadTransactions();
+    }
+  }, [loadTransactions]);
+
+  async function saveManualTransaction() {
+    if (!userId || !addForm.amount || !addForm.merchant) return;
+    setSaving(true);
+    const cents = Math.round(parseFloat(addForm.amount) * 100);
+    const { error } = await supabase.from("transactions").insert({
+      user_id: userId,
+      plaid_transaction_id: `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      amount_cents: addForm.type === "income" ? -cents : cents,
+      posted_at: addForm.date,
+      merchant_name: addForm.merchant,
+      description: addForm.merchant,
+      category: addForm.category,
+    });
+    if (!error) {
+      setShowAddModal(false);
+      setAddForm({ type: "expense", date: format(new Date(), "yyyy-MM-dd"), amount: "", merchant: "", category: "Food & Drink" });
+      loadTransactions();
+    } else {
+      console.error("Save failed:", error);
+    }
+    setSaving(false);
+  }
+
+  const spending = useMemo(() => transactions.filter(t => t.amount_cents > 0), [transactions]);
+  const income = useMemo(() => transactions.filter(t => t.amount_cents <= 0), [transactions]);
+
+  const filteredSpending = useMemo(() => {
+    let list = spending;
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(t =>
+        (t.merchant_name || "").toLowerCase().includes(q) ||
+        (t.description || "").toLowerCase().includes(q) ||
+        resolveCategory(t.category).toLowerCase().includes(q)
+      );
+    }
+    if (categoryFilter !== "all") {
+      list = list.filter(t => resolveCategory(t.category) === categoryFilter);
+    }
+    return list;
+  }, [spending, search, categoryFilter]);
+
+  const filteredIncome = useMemo(() => {
+    if (!search) return income;
+    const q = search.toLowerCase();
+    return income.filter(t =>
+      (t.merchant_name || "").toLowerCase().includes(q) ||
+      (t.description || "").toLowerCase().includes(q)
+    );
+  }, [income, search]);
+
+  const categoryData = useMemo(() => {
+    const byCat: Record<string, number> = {};
+    filteredSpending.forEach(t => {
+      const cat = resolveCategory(t.category);
+      byCat[cat] = (byCat[cat] || 0) + t.amount_cents / 100;
+    });
+    return Object.entries(byCat).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [filteredSpending]);
+
+  const chartData = useMemo(() => {
+    if (dateRange === "all") {
+      // Group by month for the "all time" view
+      const byMonth: Record<string, number> = {};
+      filteredSpending.forEach(t => {
+        const month = String(t.posted_at).slice(0, 7); // YYYY-MM
+        byMonth[month] = (byMonth[month] || 0) + t.amount_cents / 100;
+      });
+      return Object.keys(byMonth)
+        .sort()
+        .map(m => ({ label: format(parseLocalDate(m + "-01"), "MMM yy"), spend: byMonth[m] }));
+    }
+    const byDay: Record<string, number> = {};
+    filteredSpending.forEach(t => {
+      const day = String(t.posted_at).slice(0, 10);
+      byDay[day] = (byDay[day] || 0) + t.amount_cents / 100;
+    });
+    const days = parseInt(dateRange);
+    return Array.from({ length: days }, (_, i) => {
+      const d = subDays(new Date(), days - 1 - i);
+      const ds = format(d, "yyyy-MM-dd");
+      return { label: format(d, "MMM d"), spend: byDay[ds] || 0 };
+    });
+  }, [filteredSpending, dateRange]);
+
+  const totalSpend = useMemo(() => filteredSpending.reduce((s, t) => s + t.amount_cents, 0) / 100, [filteredSpending]);
+  const totalIncome = useMemo(() => income.reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100, [income]);
+
+  function getName(t: Transaction) { return t.merchant_name || t.description || "Unknown"; }
+
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 700 }}>
-      <h1>Transactions</h1>
+    <AppShell title="Transactions" userEmail={userEmail} onLogout={logout}>
 
-      <nav style={{ marginTop: 20, marginBottom: 30 }}>
-        <a href="/dashboard" style={{ marginRight: 20 }}>
-          Dashboard
-        </a>
-        <a href="/transactions" style={{ marginRight: 20 }}>
-          Transactions
-        </a>
-        <a href="/insights" style={{ marginRight: 20 }}>
-          Insights
-        </a>
-        <a href="/settings">Settings</a>
-      </nav>
-
-      <div style={{ marginTop: 20 }}>
-        <h3>Add Transaction</h3>
-
-        <input
-          placeholder="Description"
-          value={description}
-          onChange={(e) => {
-            setDescription(e.target.value);
-            setMessage(null);
-          }}
-          style={{ display: "block", marginBottom: 8, width: "100%" }}
-        />
-
-        <input
-          placeholder="Amount (e.g. 12.50)"
-          value={amount}
-          onChange={(e) => {
-            setAmount(e.target.value);
-            setMessage(null);
-          }}
-          style={{ display: "block", marginBottom: 8, width: "100%" }}
-        />
-
-        <input
-          type="date"
-          value={postedAt}
-          onChange={(e) => {
-            setPostedAt(e.target.value);
-            setMessage(null);
-          }}
-          style={{ display: "block", marginBottom: 8 }}
-        />
-
-        <select
-          value={categoryId}
-          onChange={(e) => {
-            setCategoryId(e.target.value);
-            setMessage(null);
-          }}
-          style={{ display: "block", marginBottom: 8 }}
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6 -mt-2">
+        <p className="text-[var(--text-dim)] text-sm">
+          {spending.length.toLocaleString()} expenses · {income.length.toLocaleString()} income
+          {dateRange !== "all" && <span className="text-[var(--text-muted)]"> (last {dateRange} days)</span>}
+        </p>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--gold)] hover:opacity-90 text-[#080808] rounded-lg text-sm font-bold transition-opacity"
         >
-          <option value="">Select category</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-
-        <button onClick={addTransaction} disabled={isAdding}>
-          {isAdding ? "Adding..." : "Add"}
+          <Plus className="w-4 h-4" /> Add Transaction
         </button>
-
-        {message && (
-          <div
-            style={{
-              marginTop: 10,
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-            }}
-          >
-            <p style={{ margin: 0 }}>{message}</p>
-            <button
-              onClick={() => setMessage(null)}
-              aria-label="Dismiss message"
-            >
-              x
-            </button>
-          </div>
-        )}
       </div>
 
-      <hr style={{ margin: "30px 0" }} />
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+          <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm mb-1">
+            <ArrowUpRight className="w-4 h-4 text-[var(--danger)]" /> Total spent
+          </div>
+          <div className="text-2xl font-bold text-[var(--text)]">
+            ${totalSpend.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+          </div>
+          <div className="text-xs text-[var(--text-muted)] mt-1">
+            {dateRange === "all" ? "All time" : `Last ${dateRange} days`} · {filteredSpending.length} transactions
+          </div>
+        </div>
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+          <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm mb-1">
+            <ArrowDownLeft className="w-4 h-4 text-[var(--safe)]" /> Total income
+          </div>
+          <div className="text-2xl font-bold text-[var(--safe)]">
+            ${totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+          </div>
+          <div className="text-xs text-[var(--text-muted)] mt-1">{income.length} entries</div>
+        </div>
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+          <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm mb-1">
+            <TrendingUp className="w-4 h-4" /> Top category
+          </div>
+          <div className="text-lg font-semibold text-[var(--text)] truncate">{categoryData[0]?.name || "—"}</div>
+          <div className="text-xs text-[var(--text-muted)] mt-1">
+            {categoryData[0] ? `$${categoryData[0].value.toFixed(0)} spent` : "No data"}
+          </div>
+        </div>
+      </div>
 
-      <h3>Transaction List</h3>
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-1 w-fit">
+        {(["spending", "income"] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-5 py-2 rounded-lg text-sm font-medium capitalize transition-all ${activeTab === tab ? "bg-[var(--gold)] text-[#080808]" : "text-[var(--text-dim)] hover:text-white"}`}
+          >
+            {tab} ({tab === "spending" ? spending.length : income.length})
+          </button>
+        ))}
+      </div>
 
-      {transactions.length === 0 ? (
-        <p>No transactions yet.</p>
-      ) : (
-        <ul>
-          {transactions.map((t) => (
-            <li key={t.id} style={{ marginBottom: 10 }}>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
-              >
-                {editingId === t.id ? (
-                  <>
-                    <input
-                      value={editDescription}
-                      onChange={(e) => setEditDescription(e.target.value)}
-                      placeholder="Description"
-                    />
+      {activeTab === "spending" ? (
+        <>
+          {/* Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+              <h3 className="text-sm font-medium text-[var(--text-dim)] mb-4">Spending by category</h3>
+              {categoryData.length > 0 ? (
+                <div className="h-52">
+                  <Doughnut
+                    data={{
+                      labels: categoryData.map(d => d.name),
+                      datasets: [{ data: categoryData.map(d => d.value), backgroundColor: categoryData.map(d => CATEGORY_COLORS[d.name] || "#71717a"), borderWidth: 0, hoverOffset: 4 }],
+                    }}
+                    options={{
+                      responsive: true, maintainAspectRatio: false, cutout: "60%",
+                      plugins: {
+                        legend: { position: "right", labels: { color: "#878787", font: { size: 11 }, boxWidth: 10, padding: 8 } },
+                        tooltip: { callbacks: { label: ctx => ` $${(ctx.parsed ?? 0).toFixed(2)}` } },
+                      },
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="h-52 flex items-center justify-center text-[var(--text-muted)] text-sm">No spending data</div>
+              )}
+            </div>
+            <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+              <h3 className="text-sm font-medium text-[var(--text-dim)] mb-4">Daily spending</h3>
+              {chartData.some(d => d.spend > 0) ? (
+                <div className="h-52">
+                  <Bar
+                    data={{
+                      labels: chartData.map(d => d.label),
+                      datasets: [{ data: chartData.map(d => d.spend), backgroundColor: "#C9A84C", borderRadius: 4, borderSkipped: false }],
+                    }}
+                    options={{
+                      responsive: true, maintainAspectRatio: false,
+                      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `$${(ctx.parsed.y ?? 0).toFixed(2)}` } } },
+                      scales: {
+                        x: { grid: { display: false }, ticks: { color: "#71717a", font: { size: 10 }, maxTicksLimit: 12 }, border: { display: false } },
+                        y: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "#71717a", font: { size: 10 }, callback: v => `$${v}` }, border: { display: false } },
+                      },
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="h-52 flex items-center justify-center text-[var(--text-muted)] text-sm">No spending data</div>
+              )}
+            </div>
+          </div>
 
-                    <input
-                      value={editAmount}
-                      onChange={(e) => setEditAmount(e.target.value)}
-                      placeholder="Amount"
-                      inputMode="decimal"
-                    />
-
-                    <input
-                      type="date"
-                      value={editPostedAt}
-                      onChange={(e) => setEditPostedAt(e.target.value)}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <span>{t.description}</span>
-                    <span>— ${(t.amount_cents / 100).toFixed(2)}</span>
-                    <span>— {t.categories?.name ?? "Uncategorized"}</span>
-                    <span>— {String(t.posted_at ?? "").slice(0, 10)}</span>
-                  </>
-                )}
+          {/* Filters + list */}
+          <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl overflow-hidden backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+            <div className="p-4 border-b border-[var(--border)] flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                <input type="text" placeholder="Search transactions..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--gold)]/50 text-sm" />
               </div>
+              <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none text-sm">
+                <option value="all">All categories</option>
+                {USER_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={dateRange} onChange={e => setDateRange(e.target.value as "7" | "30" | "90" | "all")} className="px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none text-sm">
+                <option value="7">7 days</option>
+                <option value="30">30 days</option>
+                <option value="90">90 days</option>
+                <option value="all">All time</option>
+              </select>
+            </div>
+            <div className="divide-y divide-[var(--border)]">
+              {loading ? (
+                <div className="p-10 text-center text-[var(--text-muted)] animate-pulse">Loading...</div>
+              ) : filteredSpending.length === 0 ? (
+                <div className="p-10 text-center text-[var(--text-muted)]">No transactions found.</div>
+              ) : filteredSpending.map(t => {
+                const cat = resolveCategory(t.category);
+                const color = CATEGORY_COLORS[cat] || "#71717a";
+                return (
+                  <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
+                        <CreditCard className="w-4 h-4" style={{ color }} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-medium text-[var(--text)] text-sm truncate">{getName(t)}</div>
+                        <div className="text-xs text-[var(--text-dim)] mt-0.5">{format(parseLocalDate(String(t.posted_at)), "MMM d, yyyy")}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 shrink-0 ml-4">
+                      {/* Inline category selector — click to change */}
+                      <select
+                        value={cat}
+                        onChange={e => updateCategory(t.id, e.target.value)}
+                        className="text-xs px-2.5 py-1 rounded-full border cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/50 transition-colors"
+                        style={{ backgroundColor: `${color}15`, borderColor: `${color}50`, color }}
+                      >
+                        {USER_CATEGORIES.map(c => (
+                          <option key={c} value={c} style={{ backgroundColor: "#111214", color: "#f0f0f0" }}>{c}</option>
+                        ))}
+                      </select>
+                      <div className="text-sm font-semibold text-[var(--text-dim)] w-20 text-right tabular-nums">
+                        -${(t.amount_cents / 100).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Income tab */
+        <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl overflow-hidden backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
+          {filteredIncome.length === 0 ? (
+            <div className="p-12 text-center text-[var(--text-muted)]">No income entries found.</div>
+          ) : (
+            <div className="divide-y divide-[var(--border)]">
+              {filteredIncome.map(t => (
+                <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-[var(--safe-dim)] flex items-center justify-center shrink-0">
+                      <ArrowDownLeft className="w-4 h-4 text-[var(--safe)]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-medium text-[var(--text)] text-sm truncate">{getName(t)}</div>
+                      <div className="text-xs text-[var(--text-dim)] mt-0.5">
+                        {t.category || "Income"} · {format(parseLocalDate(String(t.posted_at)), "MMM d, yyyy")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-sm font-semibold text-[var(--safe)] shrink-0 tabular-nums">
+                    +${Math.abs(t.amount_cents / 100).toFixed(2)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-              <div
-                style={{
-                  marginTop: 6,
-                  display: "flex",
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
+      {/* Add Transaction Modal */}
+      {showAddModal && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={e => e.target === e.currentTarget && setShowAddModal(false)}
+        >
+          <div className="bg-[#0c0d0f] border border-[var(--glass-border)] rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-white">Add Transaction</h2>
+              <button onClick={() => setShowAddModal(false)} className="text-[var(--text-dim)] hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Expense / Income toggle */}
+            <div className="flex gap-2 mb-5 p-1 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
+              <button
+                onClick={() => setAddForm(f => ({ ...f, type: "expense", category: "Food & Drink" }))}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "expense" ? "bg-[var(--danger)] text-white" : "text-[var(--text-dim)] hover:text-white"}`}
               >
-                <select
-                  value={t.category_id ?? ""}
-                  onChange={(e) =>
-                    updateTransactionCategory(t.id, e.target.value)
-                  }
-                  disabled={editingId === t.id}
-                >
-                  <option value="">Uncategorized</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
+                Expense
+              </button>
+              <button
+                onClick={() => setAddForm(f => ({ ...f, type: "income", category: "Other Income" }))}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "income" ? "bg-[var(--safe)] text-[#080808] font-semibold" : "text-[var(--text-dim)] hover:text-white"}`}
+              >
+                Income
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-[var(--text-dim)] mb-1.5 block">Date</label>
+                  <input type="date" value={addForm.date} onChange={e => setAddForm(f => ({ ...f, date: e.target.value }))} className={INPUT_CLS} />
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--text-dim)] mb-1.5 block">Amount ($)</label>
+                  <input type="number" min="0" step="0.01" placeholder="0.00" value={addForm.amount} onChange={e => setAddForm(f => ({ ...f, amount: e.target.value }))} className={INPUT_CLS} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-dim)] mb-1.5 block">{addForm.type === "income" ? "Source" : "Merchant"}</label>
+                <input type="text" placeholder={addForm.type === "income" ? "e.g. Salary, Allowance…" : "e.g. Uber Eats, Amazon…"} value={addForm.merchant} onChange={e => setAddForm(f => ({ ...f, merchant: e.target.value }))} className={INPUT_CLS} />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-dim)] mb-1.5 block">Category</label>
+                <select value={addForm.category} onChange={e => setAddForm(f => ({ ...f, category: e.target.value }))} className={INPUT_CLS}>
+                  {(addForm.type === "expense" ? USER_CATEGORIES : INCOME_CATEGORIES).map(c => (
+                    <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
-
-                {editingId === t.id ? (
-                  <>
-                    <button
-                      onClick={() => saveEdit(t.id)}
-                      disabled={savingId === t.id}
-                    >
-                      {savingId === t.id ? "Saving..." : "Save"}
-                    </button>
-
-                    <button onClick={cancelEdit}>Cancel</button>
-                  </>
-                ) : (
-                  <button
-                    onClick={() => startEdit(t)}
-                    disabled={isAdding || savingId !== null}
-                  >
-                    Edit
-                  </button>
-                )}
-
-                <button
-                  onClick={() => deleteTransaction(t.id)}
-                  disabled={editingId === t.id}
-                >
-                  Delete
-                </button>
               </div>
-            </li>
-          ))}
-        </ul>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowAddModal(false)} className="flex-1 py-2.5 border border-[var(--glass-border)] rounded-xl text-[var(--text-dim)] hover:text-white text-sm transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={saveManualTransaction}
+                disabled={saving || !addForm.amount || !addForm.merchant}
+                className="flex-1 py-2.5 bg-[var(--gold)] hover:opacity-90 disabled:opacity-50 text-[#080808] rounded-xl text-sm font-bold transition-opacity"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </main>
+    </AppShell>
   );
 }

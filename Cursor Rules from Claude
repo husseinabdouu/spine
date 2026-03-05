@@ -1,0 +1,116 @@
+# SPINE — Cursor Rules
+# Auto-loaded by Cursor on every prompt. Read this before writing any code.
+
+## What Spine Is
+Spine is a behavioral finance app that correlates biometric health data (sleep, HRV, activity)
+with spending patterns to predict high-risk financial decision moments and prevent impulsive
+spending BEFORE it happens. It is NOT a budgeting app. The core metric is "behavioral tax" —
+the extra money a user spends because of poor sleep, stress, or exhaustion.
+
+## Current Stack
+- Framework: Next.js 14 (App Router, TypeScript)
+- Database: Supabase (PostgreSQL + Auth + RLS)
+- Auth: GitHub OAuth via Supabase
+- Financial data: Plaid API (PRODUCTION — real bank data)
+- Health data: iOS Shortcut → POST to /api/health/submit
+- AI: Claude API (Anthropic) — model: claude-sonnet-4-20250514
+- Hosting: Vercel (spine-one.vercel.app)
+- Styling: Tailwind CSS
+
+## Plaid Status
+- ✅ Production approved — use PLAID_ENV=production
+- Products enabled: Transactions + Balance
+- Use /transactions/sync (NOT /transactions/get)
+- Store cursor per plaid_item for incremental syncs
+
+## Absolute Rules — Never Break These
+1. NEVER expose SUPABASE_SERVICE_ROLE_KEY or PLAID_SECRET to the client
+2. ALL privileged DB operations use service role key server-side only
+3. ALL tables have RLS enabled — users only access their own data (user_id = auth.uid())
+4. NEVER call Plaid from client-side components — always through API routes
+5. NEVER store raw Plaid access tokens in client state
+6. Health data and financial data are the most sensitive data in the app — treat accordingly
+
+## Architecture Patterns
+- API routes live in /app/api/[route]/route.ts
+- Supabase client for server: createClient(url, SERVICE_ROLE_KEY) — server only
+- Supabase client for browser: createClient(url, ANON_KEY) — client only
+- All API routes validate auth via supabase.auth.getUser() before any data access
+- Behavioral risk score is 0–100: LOW (0–30), MEDIUM (31–60), HIGH (61–100)
+
+## Database Tables (Current)
+- users → Supabase auth.users (managed)
+- plaid_items → user_id, institution_name, access_token, item_id
+- transactions → user_id, plaid_transaction_id, amount_cents, posted_at, merchant_name, description
+- health_data → user_id, date, sleep_hours, hrv_avg, active_energy (steps), sleep_quality, stress_level
+- behavioral_insights → user_id, date, risk_score, insights[], health_summary (jsonb), spending_summary (jsonb)
+
+## AI Layer — "Backbone"
+- The AI is branded as "Backbone" in the UI — users see "Backbone says…"
+- Never expose "Claude" or "Anthropic" in the UI
+- System prompt always injects: current biological state + last 60 days spending + behavioral tax
+- Default to claude-sonnet-4-20250514 for all Backbone queries
+- Backbone is the name of the feature/product, not an npm package
+
+## Naming Conventions
+- Components: PascalCase in /components
+- API routes: kebab-case directories
+- DB columns: snake_case
+- TypeScript types: PascalCase interfaces in /types
+- Environment variables: SCREAMING_SNAKE_CASE
+
+## Code Style
+- TypeScript strict mode — no `any` unless absolutely necessary
+- Async/await over .then() chains
+- Server Components by default — only use 'use client' when needed
+- Error boundaries on all major page sections
+- Loading states on all data-fetching components
+- Never use alert() — use toast notifications (sonner or similar)
+
+## Key File Paths
+- /app/dashboard → main dashboard (health + risk score + spending summary)
+- /app/transactions → transaction list
+- /app/insights → AI chat interface (BUILD THIS)
+- /app/settings → account + connections
+- /app/api/health/submit → iOS Shortcut health data POST
+- /app/api/plaid/exchange → public token exchange
+- /app/api/plaid/sync → transaction sync
+- /app/api/insights/calculate → behavioral risk calculation
+
+## What Is Already Built
+- GitHub OAuth auth flow
+- Plaid Link + token exchange + transaction sync (sandbox — upgrade to production)
+- Health data ingestion from iOS Shortcut
+- Behavioral risk engine (sleep/HRV/activity → 0-100 score)
+- Dashboard with risk score display
+- Transaction list page
+- Privacy, data-policy, security-policy pages for Plaid compliance
+
+## Full Product Vision (Read SPINE_VISION.md)
+Spine's full vision includes three major features not yet built:
+1. **Backbone as multi-model router** — Claude + GPT-4o + Gemini, routed by query type
+2. **Direct wearable integrations** — Oura, Whoop, Garmin, Fitbit via normalized health schema
+3. **Pre-purchase alerts + Spine Card** — browser extension now, Marqeta/Lithic card later
+
+These are NOT being built in the MVP. But make decisions that don't block them:
+- All AI calls go through a `backbone.query()` abstraction (not direct Anthropic SDK calls)
+- Health data ingest normalizes to SpineHealthSnapshot format with a `source_device` field
+- Never hardcode assumptions that Plaid is the only financial data source
+
+## What Is NOT Yet Built (Priority Order)
+1. Plaid production switch (PLAID_ENV=production, real data)
+2. Insights page — Backbone conversational AI interface
+3. Historical charts and pattern visualization
+4. Behavioral tax calculation and display
+5. Weekly summary generation
+6. Auto transaction sync (cron via Vercel)
+7. Morning risk push notifications
+8. Wearable direct integrations (Oura, Whoop — long term)
+9. Spine card / pre-purchase alerts (long term)
+
+## Component Philosophy
+- Dashboard is the hero experience — behavioral risk front and center
+- Every insight must be data-backed and cite specific numbers
+- Never shame users for spending — provide awareness and agency
+- Spine is not a budgeting app — do not build budget-setting features in v1
+- The "aha moment" is: "I spent $X extra because of poor sleep" — make that number visible
