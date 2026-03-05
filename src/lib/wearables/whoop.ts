@@ -1,36 +1,45 @@
-const WHOOP_BASE = "https://api.prod.whoop.com/developer/v1";
+const WHOOP_BASE = "https://api.prod.whoop.com/developer/v2";
 const TOKEN_URL  = "https://api.prod.whoop.com/oauth/oauth2/token";
 
-// ─── Whoop API response shapes ────────────────────────────────────────────────
+// ─── Whoop API v2 response shapes ─────────────────────────────────────────────
 
 interface WhoopRecovery {
   cycle_id:    number;
-  sleep_id:    number;
+  sleep_id:    string;   // UUID string in v2
   user_id:     number;
+  created_at:  string;
+  updated_at:  string;
   score_state: string;
   score: {
-    recovery_score:    number;
+    user_calibrating:   boolean;
+    recovery_score:     number;
     resting_heart_rate: number;
-    hrv_rmssd_milli:   number;
-    spo2_percentage:   number | null;
+    hrv_rmssd_milli:    number;
+    spo2_percentage:    number | null;
+    skin_temp_celsius:  number | null;
   } | null;
 }
 
 interface WhoopSleep {
-  id:          number;
+  id:          string;   // UUID string in v2
+  cycle_id:    number;
+  v1_id:       number;
   user_id:     number;
   nap:         boolean;
   score_state: string;
   score: {
     stage_summary: {
-      total_in_bed_time_milli:       number;
-      total_awake_time_milli:        number;
-      total_no_data_time_milli:      number;
-      total_light_sleep_time_milli:  number;
+      total_in_bed_time_milli:          number;
+      total_awake_time_milli:           number;
+      total_no_data_time_milli:         number;
+      total_light_sleep_time_milli:     number;
       total_slow_wave_sleep_time_milli: number;
-      total_rem_sleep_time_milli:    number;
+      total_rem_sleep_time_milli:       number;
+      sleep_cycle_count:                number;
+      disturbance_count:                number;
     };
     sleep_performance_percentage: number;
+    sleep_consistency_percentage: number;
     sleep_efficiency_percentage:  number;
   } | null;
 }
@@ -133,6 +142,18 @@ export async function getWhoopUserId(accessToken: string): Promise<number> {
     accessToken,
   );
   return profile.user_id;
+}
+
+export async function getWhoopBodyMeasurements(accessToken: string): Promise<{
+  height_meter: number | null;
+  weight_kilogram: number | null;
+  max_heart_rate: number | null;
+}> {
+  try {
+    return await whoopGet("/user/measurement/body", accessToken);
+  } catch {
+    return { height_meter: null, weight_kilogram: null, max_heart_rate: null };
+  }
 }
 
 // ─── Normalisation helpers ────────────────────────────────────────────────────

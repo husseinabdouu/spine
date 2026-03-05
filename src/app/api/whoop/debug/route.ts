@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { refreshWhoopToken } from "@/lib/wearables/whoop";
 import { format, subDays } from "date-fns";
 
-const BASE = "https://api.prod.whoop.com/developer/v1";
+const BASE = "https://api.prod.whoop.com/developer/v2";
 
 async function whoopRaw(path: string, token: string) {
   const res = await fetch(`${BASE}${path}`, {
@@ -47,17 +47,16 @@ export async function GET(request: Request) {
   const end   = `${date}T23:59:59.999Z`;
   const qs    = `?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=5`;
 
-  // Probe every plausible path variant to find what Whoop actually accepts
+  // v2 API paths
   const probes: Record<string, string> = {
-    cycle_date:              `/cycle${qs}`,
-    recovery_date:           `/recovery${qs}`,
-    recovery_bare:           `/recovery?limit=1`,
-    activity_recovery_bare:  `/activity/recovery?limit=1`,
-    sleep_date:              `/activity/sleep${qs}`,
-    sleep_bare:              `/activity/sleep?limit=1`,
-    sleep_root_bare:         `/sleep?limit=1`,
-    workout_bare:            `/activity/workout?limit=1`,
-    body_measurement:        `/body/measurement`,
+    cycle_date:       `/cycle${qs}`,
+    recovery_date:    `/recovery${qs}`,
+    recovery_bare:    `/recovery?limit=1`,
+    sleep_date:       `/activity/sleep${qs}`,
+    sleep_bare:       `/activity/sleep?limit=1`,
+    workout_bare:     `/activity/workout?limit=1`,
+    body_measurement: `/user/measurement/body`,
+    profile:          `/user/profile/basic`,
   };
 
   const results = await Promise.all(
