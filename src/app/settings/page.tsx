@@ -74,6 +74,8 @@ function SettingsPageInner() {
   const [updatingWebhook, setUpdatingWebhook]       = useState(false);
   const [webhookResult, setWebhookResult]           = useState<string | null>(null);
   const [whoopError, setWhoopError]                 = useState<string | null>(null);
+  const [whoopBackfilling, setWhoopBackfilling]     = useState(false);
+  const [whoopBackfillResult, setWhoopBackfillResult] = useState<string | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -223,6 +225,29 @@ function SettingsPageInner() {
       toast("Backfill failed", "error");
     }
     setBackfilling(false);
+  }
+
+  async function backfillWhoop() {
+    if (!userId) return;
+    setWhoopBackfilling(true);
+    setWhoopBackfillResult(null);
+    try {
+      const res  = await fetch("/api/whoop/sync", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ user_id: userId, days: 90 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWhoopBackfillResult(`Synced ${data.days_synced} days of Whoop history.`);
+        toast(`Whoop backfill complete — ${data.days_synced} days synced`, "success");
+      } else {
+        toast(data.error ?? "Backfill failed", "error");
+      }
+    } catch {
+      toast("Whoop backfill failed", "error");
+    }
+    setWhoopBackfilling(false);
   }
 
   async function syncWhoop() {
@@ -560,6 +585,34 @@ function SettingsPageInner() {
                 >
                   {disconnectingWhoop ? "Disconnecting…" : "Disconnect"}
                 </button>
+              </div>
+
+              {whoopBackfillResult && (
+                <p className="text-xs text-[var(--safe)]">{whoopBackfillResult}</p>
+              )}
+
+              <div className="pt-3 border-t border-[var(--border)]">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">Backfill history</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                      Pulls the last 90 days of Whoop data — recovery, sleep, and strain — and recalculates your risk score for each day. Run this once to populate your full history.
+                    </p>
+                  </div>
+                  <button
+                    onClick={backfillWhoop}
+                    disabled={whoopBackfilling}
+                    className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[#00D4A4]/10 hover:bg-[#00D4A4]/20 border border-[#00D4A4]/30 text-[#00D4A4] text-sm font-semibold disabled:opacity-40 transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${whoopBackfilling ? "animate-spin" : ""}`} />
+                    {whoopBackfilling ? "Backfilling…" : "Backfill 90 days"}
+                  </button>
+                </div>
+                {whoopBackfilling && (
+                  <p className="text-xs text-[var(--text-muted)] mt-2">
+                    Fetching 90 days from Whoop — this takes about 30 seconds. Don&apos;t close the page.
+                  </p>
+                )}
               </div>
 
               <p className="text-xs text-[var(--text-muted)]">
