@@ -24,8 +24,6 @@ import { format, subDays, startOfMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
 import {
   ArrowUpRight,
-  CreditCard,
-  RefreshCw,
   CheckCircle,
   Circle,
   ChevronRight,
@@ -193,7 +191,7 @@ export default function DashboardPage() {
       .from("behavioral_insights")
       .select("date, risk_score, insights, spending_summary")
       .order("date", { ascending: false })
-      .limit(30);
+      .limit(90);
     if (data) setInsightsHistory(data);
   }
 
@@ -394,6 +392,46 @@ export default function DashboardPage() {
     return b.slice(0, 3);
   }, [todayInsight, todayHealth]);
 
+  // Forward-looking actionable advice for the Today tab (distinct from hero bullets)
+  const todayAdvice = useMemo(() => {
+    if (!todayInsight) return [];
+    const level = riskLevel(todayInsight.risk_score);
+    const advice: string[] = [];
+    const extraSpend =
+      daysLikeTodayData.avgSpend > 0 && baseline > 0
+        ? Math.max(0, daysLikeTodayData.avgSpend - baseline)
+        : 0;
+
+    if (level === "LOW") {
+      advice.push("Good day to make any planned purchases — you're in baseline mode today.");
+      if (todayHealth?.sleep_hours != null && todayHealth.sleep_hours >= 7)
+        advice.push(`Well rested at ${todayHealth.sleep_hours.toFixed(1)}h — your decision-making is sharp.`);
+      else if (todayHealth?.hrv_avg != null && todayHealth.hrv_avg >= 55)
+        advice.push(`HRV ${todayHealth.hrv_avg}ms — stress is low, spending risk is low.`);
+    } else if (level === "MEDIUM") {
+      advice.push(
+        extraSpend > 0
+          ? `Based on your history, you may spend $${extraSpend.toFixed(0)} extra today — one trigger is active.`
+          : "One trigger active today — consider avoiding impulse purchases this afternoon.",
+      );
+      if (todayHealth?.hrv_avg != null && todayHealth.hrv_avg < 50)
+        advice.push(`HRV at ${todayHealth.hrv_avg}ms — slightly stressed. Delay big purchases if you can.`);
+      else if (todayHealth?.sleep_hours != null && todayHealth.sleep_hours < 7)
+        advice.push(`Slept ${todayHealth.sleep_hours.toFixed(1)}h last night — fatigue can reduce spending willpower.`);
+    } else {
+      advice.push(
+        extraSpend > 0
+          ? `High risk day — based on your history you may spend $${extraSpend.toFixed(0)} extra. Watch food delivery and shopping.`
+          : "High risk day — watch food delivery and impulse shopping today.",
+      );
+      if (todayHealth?.sleep_hours != null && todayHealth.sleep_hours < 6)
+        advice.push(`Only ${todayHealth.sleep_hours.toFixed(1)}h of sleep — poor sleep spikes impulse spending.`);
+      else if (todayHealth?.hrv_avg != null && todayHealth.hrv_avg < 40)
+        advice.push(`HRV ${todayHealth.hrv_avg}ms — high stress detected. Delay discretionary purchases if possible.`);
+    }
+    return advice.slice(0, 3);
+  }, [todayInsight, todayHealth, daysLikeTodayData.avgSpend, baseline]);
+
   const setupComplete = plaidItems.length > 0 && healthHistory.length > 0 && insightsHistory.length > 0;
 
   // Ring geometry (160×160, r=60)
@@ -427,8 +465,8 @@ export default function DashboardPage() {
       {/* ════════════════════════════════════════════════════════════════════════
           ZONE 1 — Hero ring
       ════════════════════════════════════════════════════════════════════════ */}
-      <Link href="/insights" className="block mb-4 group">
-        <div className={`${CARD} p-6 sm:p-10 text-center cursor-pointer transition-all group-hover:border-[var(--gold)]/40`}>
+      <div className="mb-4">
+        <div className={`${CARD} p-6 sm:p-10 text-center`}>
           <div className="flex flex-col items-center gap-5">
 
             {/* Ring */}
@@ -483,12 +521,18 @@ export default function DashboardPage() {
                     ))}
                   </ul>
                 )}
+                <Link
+                  href="/insights"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-sm font-semibold text-[var(--gold)] transition-colors"
+                >
+                  Ask Backbone →
+                </Link>
               </div>
             ) : (
               <div className="space-y-3">
                 <p className="text-sm text-[var(--text-muted)]">No risk score yet</p>
                 <button
-                  onClick={e => { e.preventDefault(); calculateBehavioralRisk(); }}
+                  onClick={calculateBehavioralRisk}
                   disabled={calculating}
                   className="text-sm px-5 py-2 rounded-xl bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] disabled:opacity-40 transition-colors"
                 >
@@ -497,13 +541,9 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className="flex items-center gap-1 text-xs text-[var(--text-muted)] group-hover:text-[var(--gold)] transition-colors">
-              <span>Ask Backbone for details</span>
-              <ArrowUpRight className="w-3 h-3" />
-            </div>
           </div>
         </div>
-      </Link>
+      </div>
 
       {/* ════════════════════════════════════════════════════════════════════════
           ZONE 2 — Insights strip
@@ -525,21 +565,12 @@ export default function DashboardPage() {
               {t === "today" ? "Today" : "This Week"}
             </button>
           ))}
-          <div className="ml-auto">
-            <button
-              onClick={calculateBehavioralRisk}
-              disabled={calculating}
-              className="text-xs px-2.5 py-1 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] text-[var(--text-dim)] disabled:opacity-40 transition-colors"
-            >
-              {calculating ? "…" : "Recalculate"}
-            </button>
-          </div>
         </div>
 
         {insightsTab === "today" ? (
           <div className="space-y-2">
-            {todayInsight?.insights?.length ? (
-              todayInsight.insights.slice(0, 3).map((s, i) => (
+            {todayAdvice.length > 0 ? (
+              todayAdvice.map((s, i) => (
                 <div
                   key={i}
                   className="flex gap-2.5 items-start px-3.5 py-2.5 rounded-lg bg-[var(--glass-subtle)] border border-[var(--border)]"
@@ -552,7 +583,7 @@ export default function DashboardPage() {
               <p className="text-sm text-[var(--text-muted)] py-1">
                 {insightsHistory.length === 0
                   ? "No insights yet — calculate your first risk score above."
-                  : "Hit Recalculate to generate today's insights."}
+                  : "Advice will appear once today's risk score is available."}
               </p>
             )}
             <Link
@@ -682,9 +713,9 @@ export default function DashboardPage() {
                 <p className="text-xs text-[var(--text-muted)]">
                   Calculate your risk score to see spending patterns.
                 </p>
-              ) : daysLikeTodayData.txs.length === 0 ? (
+              ) : daysLikeTodayData.txs.length < 3 ? (
                 <p className="text-xs text-[var(--text-muted)]">
-                  Not enough data yet — check back after a few more days.
+                  Still building your pattern history — check back in a few days.
                 </p>
               ) : (
                 <>
@@ -817,11 +848,11 @@ export default function DashboardPage() {
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════════
-          ZONE 4 — Baseline comparison (the punchline)
+          ZONE 4 — Baseline comparison
       ════════════════════════════════════════════════════════════════════════ */}
       <div className="mb-4 rounded-xl border border-[var(--gold)]/30 bg-[var(--gold)]/5 p-5 backdrop-blur-[28px]">
         <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--gold)] mb-2">
-          The Punchline
+          Your Baseline
         </div>
         {rScore != null && baseline > 0 ? (
           rScore > 30 ? (
@@ -860,81 +891,40 @@ export default function DashboardPage() {
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════════
-          Bank controls + Setup checklist
+          Setup checklist (hidden once complete)
       ════════════════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
+      {!setupComplete && (
         <div className={`${CARD} p-5`}>
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">Bank</span>
-            {plaidItems.length > 0 && (
-              <button
-                onClick={syncTransactions}
-                disabled={syncing}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] text-[var(--text-dim)] disabled:opacity-40 transition-colors"
-              >
-                <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Syncing…" : "Sync"}
-              </button>
+          <span className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)] block mb-4">Setup</span>
+          <ul className="space-y-3">
+            {[
+              { done: plaidItems.length > 0,      label: "Connect bank account" },
+              { done: healthHistory.length > 0,   label: "Sync health data (Whoop)" },
+              { done: insightsHistory.length > 0, label: "Calculate first risk score" },
+            ].map(({ done, label }) => (
+              <li key={label} className="flex items-center gap-2.5">
+                {done
+                  ? <CheckCircle className="w-4 h-4 text-[var(--safe)] shrink-0" />
+                  : <Circle     className="w-4 h-4 text-[var(--text-muted)] shrink-0" />}
+                <span className={`text-sm ${done ? "text-[var(--text-dim)] line-through" : "text-[var(--text-dim)]"}`}>
+                  {label}
+                </span>
+              </li>
+            ))}
+            {insightsHistory.length === 0 && plaidItems.length > 0 && (
+              <li>
+                <button
+                  onClick={calculateBehavioralRisk}
+                  disabled={calculating}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] transition-colors disabled:opacity-40"
+                >
+                  {calculating ? "Calculating…" : "Calculate risk score →"}
+                </button>
+              </li>
             )}
-          </div>
-          {plaidItems.length === 0 ? (
-            <PlaidLink onSuccess={handlePlaidSuccess} />
-          ) : (
-            <div className="space-y-2">
-              {plaidItems.map(item => (
-                <div key={item.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="w-4 h-4 text-[var(--safe)]" />
-                    <span className="text-sm text-[var(--text)]">{item.institution_name}</span>
-                  </div>
-                  <button
-                    onClick={() => disconnectBank(item.id)}
-                    disabled={disconnecting === item.id}
-                    className="text-xs text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors disabled:opacity-40"
-                  >
-                    {disconnecting === item.id ? "Removing…" : "Disconnect"}
-                  </button>
-                </div>
-              ))}
-              <PlaidLink onSuccess={handlePlaidSuccess} />
-            </div>
-          )}
+          </ul>
         </div>
-
-        {!setupComplete && (
-          <div className={`${CARD} p-5`}>
-            <span className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)] block mb-4">Setup</span>
-            <ul className="space-y-3">
-              {[
-                { done: plaidItems.length > 0,      label: "Connect bank account" },
-                { done: healthHistory.length > 0,   label: "Sync health data (Whoop)" },
-                { done: insightsHistory.length > 0, label: "Calculate first risk score" },
-              ].map(({ done, label }) => (
-                <li key={label} className="flex items-center gap-2.5">
-                  {done
-                    ? <CheckCircle className="w-4 h-4 text-[var(--safe)] shrink-0" />
-                    : <Circle     className="w-4 h-4 text-[var(--text-muted)] shrink-0" />}
-                  <span className={`text-sm ${done ? "text-[var(--text-dim)] line-through" : "text-[var(--text-dim)]"}`}>
-                    {label}
-                  </span>
-                </li>
-              ))}
-              {insightsHistory.length === 0 && plaidItems.length > 0 && (
-                <li>
-                  <button
-                    onClick={calculateBehavioralRisk}
-                    disabled={calculating}
-                    className="text-xs px-3 py-1.5 rounded-lg bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] transition-colors disabled:opacity-40"
-                  >
-                    {calculating ? "Calculating…" : "Calculate risk score →"}
-                  </button>
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
-      </div>
+      )}
 
     </AppShell>
   );
