@@ -66,8 +66,13 @@ export interface WhoopHealthSnapshot {
   sleep_hours:           number | null;
   sleep_quality:         "poor" | "fair" | "good";
   hrv_avg:               number | null;
+  resting_heart_rate:    number | null;
   stress_level:          "low" | "medium" | "high";
   active_energy:         number | null;
+  whoop_calories:        number | null;
+  whoop_rem_mins:        number | null;
+  whoop_deep_mins:       number | null;
+  whoop_light_mins:      number | null;
   workout_minutes:       null;
   source_device:         "whoop";
   whoop_recovery_score:  number | null;
@@ -179,12 +184,14 @@ export async function fetchWhoopDayData(
       ? cycleRes.value.records[0]
       : null;
 
-  // HRV + recovery score
-  const hrv           = recovery?.score?.hrv_rmssd_milli ?? null;
-  const recoveryScore = recovery?.score?.recovery_score  ?? null;
+  const hrv              = recovery?.score?.hrv_rmssd_milli   ?? null;
+  const recoveryScore    = recovery?.score?.recovery_score     ?? null;
+  const restingHeartRate = recovery?.score?.resting_heart_rate ?? null;
 
-  // Sleep hours = total_in_bed minus awake and no-data periods
   let sleepHours: number | null = null;
+  let remMins: number | null    = null;
+  let deepMins: number | null   = null;
+  let lightMins: number | null  = null;
   if (sleep?.score?.stage_summary) {
     const s = sleep.score.stage_summary;
     const asleepMs =
@@ -192,12 +199,15 @@ export async function fetchWhoopDayData(
       s.total_awake_time_milli -
       s.total_no_data_time_milli;
     sleepHours = Math.round((Math.max(0, asleepMs) / 3_600_000) * 10) / 10;
+    remMins    = Math.round(s.total_rem_sleep_time_milli       / 60_000);
+    deepMins   = Math.round(s.total_slow_wave_sleep_time_milli / 60_000);
+    lightMins  = Math.round(s.total_light_sleep_time_milli     / 60_000);
   }
   const sleepScore = sleep?.score?.sleep_performance_percentage ?? null;
 
-  // Whoop strain (0–21) → step-equivalent so the existing risk engine thresholds work
-  // strain 10 ≈ 5,000 steps · strain 14 ≈ 7,000 · strain 21 ≈ 10,500
-  const strain      = cycle?.score?.strain ?? null;
+  const strain     = cycle?.score?.strain    ?? null;
+  const kjCalories = cycle?.score?.kilojoule ?? null;
+  const calories   = kjCalories !== null ? Math.round(kjCalories * 0.239) : null;
   const activeEnergy = strain !== null ? Math.round(strain * 500) : null;
 
   return {
@@ -205,8 +215,13 @@ export async function fetchWhoopDayData(
     sleep_hours:          sleepHours,
     sleep_quality:        sleepQuality(sleepScore),
     hrv_avg:              hrv !== null ? Math.round(hrv) : null,
+    resting_heart_rate:   restingHeartRate !== null ? Math.round(restingHeartRate) : null,
     stress_level:         stressLevel(hrv),
     active_energy:        activeEnergy,
+    whoop_calories:       calories,
+    whoop_rem_mins:       remMins,
+    whoop_deep_mins:      deepMins,
+    whoop_light_mins:     lightMins,
     workout_minutes:      null,
     source_device:        "whoop",
     whoop_recovery_score: recoveryScore,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import AppShell from "@/components/AppShell";
@@ -18,11 +18,17 @@ import {
   Legend,
 } from "chart.js";
 import { Line, Chart } from "react-chartjs-2";
-import { format, subDays } from "date-fns";
+import { format, subDays, parseISO } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
-import { Activity, Moon, Heart, Zap, TrendingUp, TrendingDown, Minus, RefreshCw } from "lucide-react";
+import {
+  Activity, Moon, Heart, Zap, RefreshCw, ChevronLeft, ChevronRight,
+  TrendingUp, TrendingDown, Minus, Flame, Wind,
+} from "lucide-react";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, LineController, Filler, Tooltip, Legend);
+ChartJS.register(
+  CategoryScale, LinearScale, PointElement, LineElement,
+  BarElement, BarController, LineController, Filler, Tooltip, Legend,
+);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,89 +37,129 @@ type HealthRow = {
   sleep_hours:          number | null;
   sleep_quality:        string | null;
   hrv_avg:              number | null;
+  resting_heart_rate:   number | null;
   active_energy:        number | null;
+  whoop_calories:       number | null;
+  whoop_rem_mins:       number | null;
+  whoop_deep_mins:      number | null;
+  whoop_light_mins:     number | null;
   whoop_recovery_score: number | null;
   whoop_strain:         number | null;
   whoop_sleep_score:    number | null;
   source_device:        string | null;
 };
 
-type SpendingRow = {
-  posted_at:    string;
-  amount_cents: number;
-};
-
+type SpendingRow = { posted_at: string; amount_cents: number };
 type Range = "1" | "7" | "30" | "60" | "90" | "all";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
+type Tab   = "overview" | "sleep" | "recovery" | "strain";
 
 const CARD = "rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]";
 
-const CHART_OPTS = {
+const BASE_CHART = {
   responsive:          true,
   maintainAspectRatio: false,
   plugins: { legend: { display: false }, tooltip: { mode: "index" as const, intersect: false } },
   scales: {
-    x: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "rgba(255,255,255,0.35)", maxTicksLimit: 8, font: { size: 11 } } },
-    y: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "rgba(255,255,255,0.35)", font: { size: 11 } } },
+    x: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "rgba(255,255,255,0.3)", maxTicksLimit: 8, font: { size: 10 } } },
+    y: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "rgba(255,255,255,0.3)", font: { size: 10 } } },
   },
 };
 
-function recoveryColor(score: number | null) {
-  if (score === null) return "var(--text-muted)";
-  if (score >= 67) return "#4ade80";
-  if (score >= 34) return "#facc15";
+function rColor(v: number | null) {
+  if (v === null) return "var(--text-muted)";
+  if (v >= 67) return "#4ade80";
+  if (v >= 34) return "#facc15";
   return "#f87171";
 }
 
-function trend(values: (number | null)[]): "up" | "down" | "flat" {
-  const valid = values.filter((v): v is number => v !== null);
-  if (valid.length < 2) return "flat";
-  const recent = valid.slice(-7).reduce((a, b) => a + b, 0) / Math.min(7, valid.length);
-  const prior  = valid.slice(-14, -7).reduce((a, b) => a + b, 0) / Math.min(7, valid.length);
-  if (recent > prior * 1.03) return "up";
-  if (recent < prior * 0.97) return "down";
+function avg(vals: (number | null)[]): number | null {
+  const v = vals.filter((x): x is number => x !== null);
+  return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
+}
+
+function trendDir(vals: (number | null)[]): "up" | "down" | "flat" {
+  const v = vals.filter((x): x is number => x !== null);
+  if (v.length < 4) return "flat";
+  const half    = Math.floor(v.length / 2);
+  const recent  = v.slice(-half).reduce((a, b) => a + b, 0) / half;
+  const earlier = v.slice(0, half).reduce((a, b) => a + b, 0) / half;
+  if (recent > earlier * 1.03) return "up";
+  if (recent < earlier * 0.97) return "down";
   return "flat";
 }
 
-function TrendIcon({ dir }: { dir: "up" | "down" | "flat" }) {
+function TrendBadge({ dir }: { dir: "up" | "down" | "flat" }) {
   if (dir === "up")   return <TrendingUp   className="w-3.5 h-3.5 text-[var(--safe)]"   />;
   if (dir === "down") return <TrendingDown className="w-3.5 h-3.5 text-[var(--danger)]" />;
   return                     <Minus        className="w-3.5 h-3.5 text-[var(--text-muted)]" />;
+}
+
+function line(label: string, data: (number | null)[], color: string, fill = true) {
+  return {
+    type: "line" as const,
+    label,
+    data,
+    borderColor:     color,
+    backgroundColor: fill ? color.replace(")", ",0.08)").replace("rgb", "rgba") : "transparent",
+    fill,
+    tension:          0.4,
+    pointRadius:      2,
+    pointHoverRadius: 5,
+    borderWidth:      2,
+    spanGaps:         true,
+  };
+}
+
+function bar(label: string, data: (number | null)[], color: string) {
+  return {
+    type:            "bar" as const,
+    label,
+    data,
+    backgroundColor: color,
+    borderRadius:    3,
+  };
+}
+
+// ─── Stat pill ────────────────────────────────────────────────────────────────
+
+function Stat({ label, value, sub, color = "var(--text)" }: {
+  label: string; value: string; sub?: string; color?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">{label}</span>
+      <span className="text-lg font-bold" style={{ color }}>{value}</span>
+      {sub && <span className="text-[10px] text-[var(--text-muted)]">{sub}</span>}
+    </div>
+  );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HealthPage() {
   const router = useRouter();
+
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId,    setUserId]    = useState<string | null>(null);
   const [health,    setHealth]    = useState<HealthRow[]>([]);
   const [spending,  setSpending]  = useState<SpendingRow[]>([]);
-  const [range,     setRange]     = useState<Range>("7");
+  const [range,     setRange]     = useState<Range>("30");
+  const [tab,       setTab]       = useState<Tab>("overview");
+  const [dayIdx,    setDayIdx]    = useState<number | null>(null); // null = no day selected
   const [loading,   setLoading]   = useState(true);
   const [syncing,   setSyncing]   = useState(false);
 
   useEffect(() => { init(); }, []);
-  useEffect(() => { if (userId) loadData(userId, range); }, [userId, range]);
 
-  async function init() {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session) { router.push("/setup"); return; }
-    setUserEmail(data.session.user.email ?? null);
-    setUserId(data.session.user.id);
-  }
-
-  async function loadData(uid: string, r: Range) {
+  const loadData = useCallback(async (uid: string, r: Range) => {
     setLoading(true);
-    const fromDate = r === "all"
-      ? "2000-01-01"
+    const fromDate = r === "all" ? "2000-01-01"
       : format(subDays(new Date(), r === "1" ? 1 : parseInt(r)), "yyyy-MM-dd");
 
     const [{ data: hData }, { data: sData }] = await Promise.all([
       supabase
         .from("health_data")
-        .select("date,sleep_hours,sleep_quality,hrv_avg,active_energy,whoop_recovery_score,whoop_strain,whoop_sleep_score,source_device")
+        .select("date,sleep_hours,sleep_quality,hrv_avg,resting_heart_rate,active_energy,whoop_calories,whoop_rem_mins,whoop_deep_mins,whoop_light_mins,whoop_recovery_score,whoop_strain,whoop_sleep_score,source_device")
         .eq("user_id", uid)
         .gte("date", fromDate)
         .order("date", { ascending: true }),
@@ -127,193 +173,141 @@ export default function HealthPage() {
 
     setHealth(hData ?? []);
     setSpending(sData ?? []);
+    setDayIdx(null);
     setLoading(false);
+  }, []);
+
+  async function init() {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) { router.push("/setup"); return; }
+    const uid = data.session.user.id;
+    setUserEmail(data.session.user.email ?? null);
+    setUserId(uid);
+    await loadData(uid, range);
   }
 
-  function logout() { supabase.auth.signOut().then(() => router.push("/setup")); }
+  useEffect(() => { if (userId) loadData(userId, range); }, [userId, range, loadData]);
 
   async function refreshToday() {
     if (!userId || syncing) return;
     setSyncing(true);
     const today     = format(new Date(), "yyyy-MM-dd");
     const yesterday = format(subDays(new Date(), 1), "yyyy-MM-dd");
-    // Sync both today and yesterday (Whoop strain/HRV update throughout the day;
-    // yesterday's recovery score may also have been updated since last sync)
     await Promise.allSettled([
-      fetch("/api/whoop/sync", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ user_id: userId, date: today }),
-      }),
-      fetch("/api/whoop/sync", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ user_id: userId, date: yesterday }),
-      }),
+      fetch("/api/whoop/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, date: today }) }),
+      fetch("/api/whoop/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, date: yesterday }) }),
     ]);
     await loadData(userId, range);
     setSyncing(false);
   }
 
-  // ── Derived data ─────────────────────────────────────────────────────────────
+  function logout() { supabase.auth.signOut().then(() => router.push("/setup")); }
 
-  const latest = health.at(-1) ?? null;
-  const labels  = health.map(h => format(parseLocalDate(h.date), "MMM d"));
+  // ── Derived ──────────────────────────────────────────────────────────────────
 
-  // Helper: average of non-null values
-  function avg(vals: (number | null)[]): number | null {
-    const v = vals.filter((x): x is number => x !== null);
-    return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
-  }
+  const labels      = health.map(h => format(parseLocalDate(h.date), "MMM d"));
+  const latest      = health.at(-1) ?? null;
+  const selectedDay = dayIdx !== null ? health[dayIdx] : null;
 
-  // Daily spending totals keyed by date
   const spendByDate: Record<string, number> = {};
   for (const tx of spending) {
     const d = tx.posted_at.slice(0, 10);
     spendByDate[d] = (spendByDate[d] ?? 0) + tx.amount_cents / 100;
   }
-  const spendSeries = health.map(h => spendByDate[h.date] ?? 0);
 
-  const recoveryData = health.map(h => h.whoop_recovery_score);
-  const hrvData      = health.map(h => h.hrv_avg);
-  const sleepData    = health.map(h => h.sleep_hours);
-  const strainData   = health.map(h => h.whoop_strain);
+  const recoveryVals = health.map(h => h.whoop_recovery_score);
+  const hrvVals      = health.map(h => h.hrv_avg);
+  const rhrVals      = health.map(h => h.resting_heart_rate);
+  const sleepVals    = health.map(h => h.sleep_hours);
+  const strainVals   = health.map(h => h.whoop_strain);
+  const calVals      = health.map(h => h.whoop_calories);
+  const spendVals    = health.map(h => spendByDate[h.date] ?? 0);
+  const remVals      = health.map(h => h.whoop_rem_mins);
+  const deepVals     = health.map(h => h.whoop_deep_mins);
+  const lightVals    = health.map(h => h.whoop_light_mins);
 
-  // Period averages (used in the metric cards)
-  const avgRecovery = avg(recoveryData);
-  const avgHrv      = avg(hrvData);
-  const avgSleep    = avg(sleepData);
-  const avgStrain   = avg(strainData);
+  const rangeLbl = range === "1" ? "today" : range === "all" ? "all-time avg"
+    : range === "7" ? "7d avg" : `${range}d avg`;
 
-  const rangeLabelShort = range === "1" ? "today" : range === "7" ? "7d avg" : range === "all" ? "all-time avg" : `${range}d avg`;
+  // ─── Charts ──────────────────────────────────────────────────────────────────
 
-  const recoveryTrend = trend(recoveryData);
-  const hrvTrend      = trend(hrvData);
-  const sleepTrend    = trend(sleepData);
-  const strainTrend   = trend(strainData);
-
-  // ── Chart datasets ───────────────────────────────────────────────────────────
-
-  const lineBase = {
-    tension:           0.4,
-    pointRadius:       2,
-    pointHoverRadius:  5,
-    borderWidth:       2,
-    spanGaps:          true,
-  };
-
-  const recoveryChart = {
+  const recoveryChart = { labels, datasets: [line("Recovery %", recoveryVals, "#4ade80")] };
+  const hrvChart      = { labels, datasets: [line("HRV ms", hrvVals, "#818cf8"), line("RHR bpm", rhrVals, "#f87171")] };
+  const sleepChart    = {
     labels,
-    datasets: [{
-      ...lineBase,
-      label:           "Recovery %",
-      data:            recoveryData,
-      borderColor:     "#4ade80",
-      backgroundColor: "rgba(74,222,128,0.08)",
-      fill:            true,
-    }],
+    datasets: [
+      bar("REM",   remVals,   "rgba(129,140,248,0.7)"),
+      bar("Deep",  deepVals,  "rgba(74,222,128,0.7)"),
+      bar("Light", lightVals, "rgba(56,189,248,0.5)"),
+    ],
   };
-
-  const hrvChart = {
+  const strainCalChart = {
     labels,
-    datasets: [{
-      ...lineBase,
-      label:           "HRV (ms)",
-      data:            hrvData,
-      borderColor:     "#818cf8",
-      backgroundColor: "rgba(129,140,248,0.08)",
-      fill:            true,
-    }],
+    datasets: [
+      line("Strain", strainVals, "#fb923c"),
+      { ...bar("Calories", calVals, "rgba(201,168,76,0.4)"), yAxisID: "y1" },
+    ],
   };
-
-  const sleepChart = {
-    labels,
-    datasets: [{
-      ...lineBase,
-      label:           "Sleep (hrs)",
-      data:            sleepData,
-      borderColor:     "#38bdf8",
-      backgroundColor: "rgba(56,189,248,0.08)",
-      fill:            true,
-    }],
-  };
-
   const overlayChart = {
     labels,
     datasets: [
-      {
-        type:            "line" as const,
-        ...lineBase,
-        label:           "Recovery %",
-        data:            recoveryData,
-        borderColor:     "#4ade80",
-        backgroundColor: "rgba(74,222,128,0.06)",
-        fill:            true,
-        yAxisID:         "y",
-      },
-      {
-        type:            "bar" as const,
-        label:           "Spending ($)",
-        data:            spendSeries,
-        backgroundColor: "rgba(201,168,76,0.35)",
-        borderColor:     "rgba(201,168,76,0.7)",
-        borderWidth:     1,
-        yAxisID:         "y1",
-      },
+      { ...line("Recovery %", recoveryVals, "#4ade80"), yAxisID: "y" },
+      { ...bar("Spending $", spendVals, "rgba(201,168,76,0.4)"), yAxisID: "y1" },
     ],
   };
 
-  const overlayOpts = {
-    ...CHART_OPTS,
+  const dualOpts = (leftLabel: string, rightLabel: string) => ({
+    ...BASE_CHART,
     scales: {
-      ...CHART_OPTS.scales,
-      y:  { ...CHART_OPTS.scales.y, position: "left"  as const, title: { display: true, text: "Recovery %", color: "rgba(255,255,255,0.3)", font: { size: 10 } } },
-      y1: { ...CHART_OPTS.scales.y, position: "right" as const, grid: { drawOnChartArea: false }, title: { display: true, text: "Spending $", color: "rgba(255,255,255,0.3)", font: { size: 10 } } },
+      ...BASE_CHART.scales,
+      y:  { ...BASE_CHART.scales.y, position: "left"  as const, title: { display: true, text: leftLabel,  color: "rgba(255,255,255,0.25)", font: { size: 10 } } },
+      y1: { ...BASE_CHART.scales.y, position: "right" as const, grid: { drawOnChartArea: false }, title: { display: true, text: rightLabel, color: "rgba(255,255,255,0.25)", font: { size: 10 } } },
     },
-  };
+  });
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  const stackedOpts = { ...BASE_CHART, scales: { ...BASE_CHART.scales, x: { ...BASE_CHART.scales.x, stacked: true }, y: { ...BASE_CHART.scales.y, stacked: true } } };
+
+  // ─── Render helpers ──────────────────────────────────────────────────────────
+
+  const RANGES: Range[] = ["1", "7", "30", "60", "90", "all"];
+  const TABS: { key: Tab; label: string }[] = [
+    { key: "overview",  label: "Overview"  },
+    { key: "recovery",  label: "Recovery"  },
+    { key: "sleep",     label: "Sleep"     },
+    { key: "strain",    label: "Strain"    },
+  ];
 
   if (!userId) return null;
 
   return (
     <AppShell userEmail={userEmail ?? undefined} onLogout={logout}>
-      <div className="space-y-6 pb-8">
+      <div className="space-y-5 pb-8">
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-white">Health</h1>
             <p className="text-sm text-[var(--text-muted)] mt-0.5">
               {health.length > 0
-                ? `${health.length} days of data · last synced ${format(parseLocalDate(health.at(-1)!.date), "MMM d")}`
-                : "No health data yet — connect Whoop in Settings"}
+                ? `${health.length} days · last synced ${format(parseLocalDate(health.at(-1)!.date), "MMM d")}`
+                : "No data — connect Whoop in Settings"}
             </p>
           </div>
-
-          <div className="flex items-center gap-2">
-            {/* Range selector */}
-            <div className="flex gap-1 bg-white/[0.04] rounded-lg p-1 border border-[var(--border)]">
-              {(["1", "7", "30", "60", "90", "all"] as Range[]).map(r => (
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex gap-0.5 bg-white/[0.04] rounded-lg p-1 border border-[var(--border)]">
+              {RANGES.map(r => (
                 <button
                   key={r}
                   onClick={() => setRange(r)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                    range === r
-                      ? "bg-[var(--gold)] text-black"
-                      : "text-[var(--text-dim)] hover:text-white"
-                  }`}
+                  className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${range === r ? "bg-[var(--gold)] text-black" : "text-[var(--text-dim)] hover:text-white"}`}
                 >
-                  {r === "all" ? "All" : r === "1" ? "1d" : r === "7" ? "7d" : `${r}d`}
+                  {r === "all" ? "All" : r === "1" ? "1d" : `${r}d`}
                 </button>
               ))}
             </div>
-
-            {/* Refresh button */}
             <button
               onClick={refreshToday}
               disabled={syncing}
-              title="Sync today's Whoop data"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--text-dim)] hover:text-white hover:border-white/20 transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
@@ -328,172 +322,231 @@ export default function HealthPage() {
           <div className={`${CARD} p-12 text-center`}>
             <Activity className="w-10 h-10 text-[var(--text-muted)] mx-auto mb-3" />
             <p className="text-[var(--text-dim)] font-medium mb-1">No health data yet</p>
-            <p className="text-sm text-[var(--text-muted)]">
-              Connect Whoop in Settings, then run "Backfill all time" to populate your history.
-            </p>
+            <p className="text-sm text-[var(--text-muted)]">Connect Whoop in Settings, then run "Backfill all time".</p>
           </div>
         ) : (
           <>
-            {/* ── Metric cards ── */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* ── 8 metric cards ── */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                {
-                  label:   "Recovery",
-                  primary: avgRecovery != null ? `${Math.round(avgRecovery)}%` : "—",
-                  latest:  latest?.whoop_recovery_score != null ? `${Math.round(latest.whoop_recovery_score)}%` : null,
-                  sub:     avgRecovery != null
-                    ? avgRecovery >= 67 ? "Green zone" : avgRecovery >= 34 ? "Yellow zone" : "Red zone"
-                    : "No scored data yet",
-                  color:   recoveryColor(avgRecovery),
-                  Icon:    Activity,
-                  trend:   recoveryTrend,
-                },
-                {
-                  label:   "HRV",
-                  primary: avgHrv != null ? `${Math.round(avgHrv)} ms` : "—",
-                  latest:  latest?.hrv_avg != null ? `${Math.round(latest.hrv_avg)} ms` : null,
-                  sub:     "heart rate variability",
-                  color:   "#818cf8",
-                  Icon:    Heart,
-                  trend:   hrvTrend,
-                },
-                {
-                  label:   "Sleep",
-                  primary: avgSleep != null ? `${avgSleep}h` : "—",
-                  latest:  latest?.sleep_hours != null ? `${latest.sleep_hours}h` : null,
-                  sub:     latest?.whoop_sleep_score != null ? `latest: ${Math.round(latest.whoop_sleep_score)}% perf` : "sleep duration",
-                  color:   "#38bdf8",
-                  Icon:    Moon,
-                  trend:   sleepTrend,
-                },
-                {
-                  label:   "Strain",
-                  primary: avgStrain != null ? avgStrain.toFixed(1) : "—",
-                  latest:  latest?.whoop_strain != null ? latest.whoop_strain.toFixed(1) : null,
-                  sub:     "day strain score",
-                  color:   "#fb923c",
-                  Icon:    Zap,
-                  trend:   strainTrend,
-                },
-              ].map(({ label, primary, latest: latestVal, sub, color, Icon, trend: t }) => (
+                { label: "Recovery",  val: avg(recoveryVals), unit: "%",   color: rColor(avg(recoveryVals)), Icon: Activity, trend: trendDir(recoveryVals) },
+                { label: "HRV",       val: avg(hrvVals),      unit: " ms", color: "#818cf8",                 Icon: Heart,    trend: trendDir(hrvVals) },
+                { label: "RHR",       val: avg(rhrVals),      unit: " bpm",color: "#f87171",                 Icon: Heart,    trend: trendDir(rhrVals.map(v => v !== null ? -v : null)) },
+                { label: "Sleep",     val: avg(sleepVals),    unit: "h",   color: "#38bdf8",                 Icon: Moon,     trend: trendDir(sleepVals) },
+                { label: "Strain",    val: avg(strainVals),   unit: "",    color: "#fb923c",                 Icon: Zap,      trend: trendDir(strainVals) },
+                { label: "Calories",  val: avg(calVals),      unit: " cal",color: "#fbbf24",                 Icon: Flame,    trend: trendDir(calVals) },
+                { label: "REM",       val: avg(remVals),      unit: " min",color: "#a78bfa",                 Icon: Wind,     trend: trendDir(remVals) },
+                { label: "Deep",      val: avg(deepVals),     unit: " min",color: "#34d399",                 Icon: Moon,     trend: trendDir(deepVals) },
+              ].map(({ label, val, unit, color, Icon, trend }) => (
                 <div key={label} className={`${CARD} p-4`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Icon className="w-4 h-4" style={{ color }} />
-                      <span className="text-xs font-medium text-[var(--text-dim)] uppercase tracking-wider">{label}</span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <Icon className="w-3.5 h-3.5" style={{ color }} />
+                      <span className="text-[10px] font-semibold text-[var(--text-dim)] uppercase tracking-wider">{label}</span>
                     </div>
-                    <TrendIcon dir={t} />
+                    <TrendBadge dir={trend} />
                   </div>
-                  <div className="text-2xl font-bold" style={{ color }}>{primary}</div>
-                  <div className="text-[10px] text-[var(--text-muted)] mt-0.5 uppercase tracking-wider">{rangeLabelShort}</div>
-                  {latestVal && range !== "1" && (
-                    <div className="text-xs text-[var(--text-dim)] mt-1">latest: {latestVal}</div>
-                  )}
-                  <div className="text-xs text-[var(--text-muted)] mt-0.5">{sub}</div>
+                  <div className="text-xl font-bold" style={{ color }}>
+                    {val !== null ? `${val}${unit}` : "—"}
+                  </div>
+                  <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{rangeLbl}</div>
                 </div>
               ))}
             </div>
 
-            {/* ── Charts grid (hidden for 1-day view) ── */}
-            {health.length > 1 && <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* ── Tab bar ── */}
+            {health.length > 1 && (
+              <>
+                <div className="flex gap-1 border-b border-[var(--border)]">
+                  {TABS.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setTab(key)}
+                      className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${tab === key ? "border-[var(--gold)] text-white" : "border-transparent text-[var(--text-muted)] hover:text-white"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
 
-              {/* Recovery trend */}
-              <div className={`${CARD} p-5`}>
-                <div className="flex items-center gap-2 mb-4">
-                  <Activity className="w-4 h-4 text-[#4ade80]" />
-                  <h3 className="text-sm font-semibold text-[var(--text)]">Recovery Score</h3>
-                  <TrendIcon dir={recoveryTrend} />
-                </div>
-                <div className="h-48">
-                  <Line data={recoveryChart} options={{ ...CHART_OPTS, scales: { ...CHART_OPTS.scales, y: { ...CHART_OPTS.scales.y, min: 0, max: 100 } } }} />
-                </div>
+                {/* ── Overview tab ── */}
+                {tab === "overview" && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-4">Recovery Score</p>
+                      <div className="h-48"><Line data={recoveryChart} options={{ ...BASE_CHART, scales: { ...BASE_CHART.scales, y: { ...BASE_CHART.scales.y, min: 0, max: 100 } } }} /></div>
+                    </div>
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-1">HRV &amp; Resting HR</p>
+                      <p className="text-xs text-[var(--text-muted)] mb-4"><span className="text-[#818cf8]">■</span> HRV &nbsp; <span className="text-[#f87171]">■</span> RHR</p>
+                      <div className="h-48"><Line data={hrvChart} options={BASE_CHART} /></div>
+                    </div>
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-1">Recovery vs Spending</p>
+                      <p className="text-xs text-[var(--text-muted)] mb-4">Low recovery days often precede spending spikes</p>
+                      <div className="h-48"><Chart type="bar" data={overlayChart} options={dualOpts("Recovery %", "Spending $")} /></div>
+                    </div>
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-1">Strain &amp; Calories</p>
+                      <p className="text-xs text-[var(--text-muted)] mb-4"><span className="text-[#fb923c]">■</span> Strain &nbsp; <span className="text-[#fbbf24]">■</span> Calories</p>
+                      <div className="h-48"><Chart type="bar" data={strainCalChart} options={dualOpts("Strain", "Calories")} /></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Recovery tab ── */}
+                {tab === "recovery" && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-4">Recovery Score</p>
+                      <div className="h-52"><Line data={recoveryChart} options={{ ...BASE_CHART, scales: { ...BASE_CHART.scales, y: { ...BASE_CHART.scales.y, min: 0, max: 100 } } }} /></div>
+                    </div>
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-4">HRV &amp; Resting HR</p>
+                      <div className="h-52"><Line data={hrvChart} options={BASE_CHART} /></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Sleep tab ── */}
+                {tab === "sleep" && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-4">Total Sleep Duration</p>
+                      <div className="h-52"><Line data={{ labels, datasets: [line("Sleep hrs", sleepVals, "#38bdf8")] }} options={{ ...BASE_CHART, scales: { ...BASE_CHART.scales, y: { ...BASE_CHART.scales.y, min: 0, max: 12 } } }} /></div>
+                    </div>
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-1">Sleep Stages</p>
+                      <p className="text-xs text-[var(--text-muted)] mb-4"><span className="text-[#a78bfa]">■</span> REM &nbsp; <span className="text-[#34d399]">■</span> Deep &nbsp; <span className="text-[#38bdf8]">■</span> Light</p>
+                      <div className="h-52"><Chart type="bar" data={sleepChart} options={stackedOpts} /></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Strain tab ── */}
+                {tab === "strain" && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-4">Daily Strain</p>
+                      <div className="h-52"><Line data={{ labels, datasets: [line("Strain", strainVals, "#fb923c")] }} options={BASE_CHART} /></div>
+                    </div>
+                    <div className={`${CARD} p-5`}>
+                      <p className="text-sm font-semibold text-[var(--text)] mb-4">Calories Burned</p>
+                      <div className="h-52"><Chart type="bar" data={{ labels, datasets: [bar("Calories", calVals, "rgba(251,191,36,0.6)")] }} options={BASE_CHART} /></div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── Day-by-day log ── */}
+            <div className={`${CARD} overflow-hidden`}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+                <h3 className="text-sm font-semibold text-[var(--text)]">Daily Log</h3>
+                {selectedDay && (
+                  <button onClick={() => setDayIdx(null)} className="text-xs text-[var(--text-muted)] hover:text-white transition-colors">
+                    ← Back to list
+                  </button>
+                )}
               </div>
 
-              {/* HRV trend */}
-              <div className={`${CARD} p-5`}>
-                <div className="flex items-center gap-2 mb-4">
-                  <Heart className="w-4 h-4 text-[#818cf8]" />
-                  <h3 className="text-sm font-semibold text-[var(--text)]">Heart Rate Variability</h3>
-                  <TrendIcon dir={hrvTrend} />
-                </div>
-                <div className="h-48">
-                  <Line data={hrvChart} options={CHART_OPTS} />
-                </div>
-              </div>
+              {/* Single day detail */}
+              {selectedDay ? (
+                <div className="p-5 space-y-5">
+                  <div className="flex items-center justify-between">
+                    <button onClick={() => setDayIdx(d => d! > 0 ? d! - 1 : d)} disabled={dayIdx === 0} className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--text-dim)] hover:text-white disabled:opacity-30 transition-colors">
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <h4 className="text-base font-semibold text-white">
+                      {format(parseLocalDate(selectedDay.date), "EEEE, MMMM d yyyy")}
+                    </h4>
+                    <button onClick={() => setDayIdx(d => d! < health.length - 1 ? d! + 1 : d)} disabled={dayIdx === health.length - 1} className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--text-dim)] hover:text-white disabled:opacity-30 transition-colors">
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
 
-              {/* Sleep trend */}
-              <div className={`${CARD} p-5`}>
-                <div className="flex items-center gap-2 mb-4">
-                  <Moon className="w-4 h-4 text-[#38bdf8]" />
-                  <h3 className="text-sm font-semibold text-[var(--text)]">Sleep Duration</h3>
-                  <TrendIcon dir={sleepTrend} />
-                </div>
-                <div className="h-48">
-                  <Line data={sleepChart} options={{ ...CHART_OPTS, scales: { ...CHART_OPTS.scales, y: { ...CHART_OPTS.scales.y, min: 0, max: 12 } } }} />
-                </div>
-              </div>
+                  {/* Recovery */}
+                  <div className={`${CARD} p-4`}>
+                    <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-3">Recovery</p>
+                    <div className="grid grid-cols-3 gap-4">
+                      <Stat label="Score" value={selectedDay.whoop_recovery_score != null ? `${Math.round(selectedDay.whoop_recovery_score)}%` : "—"} color={rColor(selectedDay.whoop_recovery_score)} />
+                      <Stat label="HRV" value={selectedDay.hrv_avg != null ? `${Math.round(selectedDay.hrv_avg)} ms` : "—"} color="#818cf8" />
+                      <Stat label="Resting HR" value={selectedDay.resting_heart_rate != null ? `${Math.round(selectedDay.resting_heart_rate)} bpm` : "—"} color="#f87171" />
+                    </div>
+                  </div>
 
-              {/* Recovery vs Spending overlay */}
-              <div className={`${CARD} p-5`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <TrendingUp className="w-4 h-4 text-[var(--gold)]" />
-                  <h3 className="text-sm font-semibold text-[var(--text)]">Recovery vs Spending</h3>
-                </div>
-                <p className="text-xs text-[var(--text-muted)] mb-4">Low recovery days often precede spending spikes</p>
-                <div className="h-48">
-                  <Chart type="bar" data={overlayChart} options={overlayOpts} />
-                </div>
-              </div>
+                  {/* Sleep */}
+                  <div className={`${CARD} p-4`}>
+                    <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-3">Sleep</p>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-4">
+                      <Stat label="Duration" value={selectedDay.sleep_hours != null ? `${selectedDay.sleep_hours}h` : "—"} color="#38bdf8" />
+                      <Stat label="Score" value={selectedDay.whoop_sleep_score != null ? `${Math.round(selectedDay.whoop_sleep_score)}%` : "—"} />
+                      <Stat label="REM" value={selectedDay.whoop_rem_mins != null ? `${selectedDay.whoop_rem_mins}m` : "—"} color="#a78bfa" />
+                      <Stat label="Deep" value={selectedDay.whoop_deep_mins != null ? `${selectedDay.whoop_deep_mins}m` : "—"} color="#34d399" />
+                      <Stat label="Light" value={selectedDay.whoop_light_mins != null ? `${selectedDay.whoop_light_mins}m` : "—"} color="#38bdf8" />
+                      <Stat label="Quality" value={selectedDay.sleep_quality ?? "—"} />
+                    </div>
+                  </div>
 
-            </div>}
-
-            {/* ── Recent days table ── */}
-            <div className={`${CARD} p-5`}>
-              <h3 className="text-sm font-semibold text-[var(--text)] mb-4">
-                {range === "1" ? "Today" : range === "7" ? "Last 7 Days" : "Recent Days"}
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-[var(--text-muted)] uppercase tracking-wider border-b border-[var(--border)]">
-                      <th className="pb-2 pr-4">Date</th>
-                      <th className="pb-2 pr-4">Recovery</th>
-                      <th className="pb-2 pr-4">HRV</th>
-                      <th className="pb-2 pr-4">Sleep</th>
-                      <th className="pb-2 pr-4">Strain</th>
-                      <th className="pb-2">Spent</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border)]">
-                    {[...health].reverse().slice(0, range === "1" ? 2 : range === "7" ? 7 : 14).map(row => {
-                      const rec = row.whoop_recovery_score;
-                      const daySpend = spendByDate[row.date] ?? 0;
-                      return (
-                        <tr key={row.date} className="text-[var(--text-dim)] hover:bg-white/[0.02] transition-colors">
-                          <td className="py-2.5 pr-4 font-medium text-[var(--text)]">
-                            {format(parseLocalDate(row.date), "MMM d")}
-                          </td>
-                          <td className="py-2.5 pr-4">
-                            {rec != null ? (
-                              <span className="font-semibold" style={{ color: recoveryColor(rec) }}>
-                                {Math.round(rec)}%
-                              </span>
-                            ) : "—"}
-                          </td>
-                          <td className="py-2.5 pr-4">{row.hrv_avg != null ? `${Math.round(row.hrv_avg)} ms` : "—"}</td>
-                          <td className="py-2.5 pr-4">{row.sleep_hours != null ? `${row.sleep_hours}h` : "—"}</td>
-                          <td className="py-2.5 pr-4">{row.whoop_strain != null ? row.whoop_strain.toFixed(1) : "—"}</td>
-                          <td className="py-2.5">
-                            {daySpend > 0
-                              ? <span className="text-[var(--gold)]">${daySpend.toFixed(0)}</span>
-                              : <span className="text-[var(--text-muted)]">—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                  {/* Strain */}
+                  <div className={`${CARD} p-4`}>
+                    <p className="text-xs uppercase tracking-wider text-[var(--text-muted)] mb-3">Activity</p>
+                    <div className="grid grid-cols-3 gap-4">
+                      <Stat label="Strain" value={selectedDay.whoop_strain != null ? selectedDay.whoop_strain.toFixed(1) : "—"} color="#fb923c" />
+                      <Stat label="Calories" value={selectedDay.whoop_calories != null ? `${selectedDay.whoop_calories} cal` : "—"} color="#fbbf24" />
+                      <Stat label="Spending" value={spendByDate[selectedDay.date] ? `$${spendByDate[selectedDay.date].toFixed(0)}` : "—"} color="var(--gold)" />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                // Day list
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
+                        <th className="px-5 py-3">Date</th>
+                        <th className="px-3 py-3">Recovery</th>
+                        <th className="px-3 py-3">HRV</th>
+                        <th className="px-3 py-3">RHR</th>
+                        <th className="px-3 py-3">Sleep</th>
+                        <th className="px-3 py-3">Strain</th>
+                        <th className="px-3 py-3">Calories</th>
+                        <th className="px-3 py-3">Spent</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {[...health].reverse().map((row, i) => {
+                        const realIdx = health.length - 1 - i;
+                        const daySpend = spendByDate[row.date] ?? 0;
+                        return (
+                          <tr
+                            key={row.date}
+                            onClick={() => setDayIdx(realIdx)}
+                            className="text-[var(--text-dim)] hover:bg-white/[0.03] cursor-pointer transition-colors"
+                          >
+                            <td className="px-5 py-2.5 font-medium text-[var(--text)] whitespace-nowrap">
+                              {format(parseLocalDate(row.date), "MMM d, yyyy")}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {row.whoop_recovery_score != null
+                                ? <span className="font-semibold" style={{ color: rColor(row.whoop_recovery_score) }}>{Math.round(row.whoop_recovery_score)}%</span>
+                                : "—"}
+                            </td>
+                            <td className="px-3 py-2.5">{row.hrv_avg != null ? `${Math.round(row.hrv_avg)}` : "—"}</td>
+                            <td className="px-3 py-2.5">{row.resting_heart_rate != null ? `${Math.round(row.resting_heart_rate)}` : "—"}</td>
+                            <td className="px-3 py-2.5">{row.sleep_hours != null ? `${row.sleep_hours}h` : "—"}</td>
+                            <td className="px-3 py-2.5">{row.whoop_strain != null ? row.whoop_strain.toFixed(1) : "—"}</td>
+                            <td className="px-3 py-2.5">{row.whoop_calories != null ? row.whoop_calories : "—"}</td>
+                            <td className="px-3 py-2.5">
+                              {daySpend > 0 ? <span className="text-[var(--gold)]">${daySpend.toFixed(0)}</span> : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
           </>

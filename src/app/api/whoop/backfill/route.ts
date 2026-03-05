@@ -23,15 +23,20 @@ interface WhoopRecoveryRecord {
 
 interface WhoopSleepRecord {
   start:       string;
+  end:         string;   // sleep ends in the morning — use end date to align with recovery
   nap:         boolean;
   score_state: string;
   score: {
     stage_summary: {
-      total_in_bed_time_milli:  number;
-      total_awake_time_milli:   number;
-      total_no_data_time_milli: number;
+      total_in_bed_time_milli:          number;
+      total_awake_time_milli:           number;
+      total_no_data_time_milli:         number;
+      total_light_sleep_time_milli:     number;
+      total_slow_wave_sleep_time_milli: number;
+      total_rem_sleep_time_milli:       number;
     };
     sleep_performance_percentage: number;
+    sleep_efficiency_percentage:  number;
   } | null;
 }
 
@@ -39,8 +44,10 @@ interface WhoopCycleRecord {
   start:       string;
   score_state: string;
   score: {
-    strain:    number;
-    kilojoule: number;
+    strain:             number;
+    kilojoule:          number;
+    average_heart_rate: number;
+    max_heart_rate:     number;
   } | null;
 }
 
@@ -163,11 +170,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // Prefer non-nap sleep records; only use nap if it's the only record for that date
+    // Use the END date of sleep (sleep ends in the morning = same calendar day as recovery).
+    // Using start date (e.g. 11pm Mar 4) would misalign with recovery (8am Mar 5).
     const sleepByDate = new Map<string, WhoopSleepRecord>();
     for (const s of sleepRecords) {
       if (s.score_state !== "SCORED" || !s.score) continue;
-      const d = toDate(s.start);
+      const d = toDate(s.end ?? s.start);
       const existing = sleepByDate.get(d);
       if (!existing || (!s.nap && existing.nap)) {
         sleepByDate.set(d, s);
@@ -194,10 +202,14 @@ export async function POST(request: Request) {
       const sleep = sleepByDate.get(date)    ?? null;
       const cycle = cycleByDate.get(date)    ?? null;
 
-      const hrv           = rec?.score?.hrv_rmssd_milli ?? null;
-      const recoveryScore = rec?.score?.recovery_score  ?? null;
+      const hrv              = rec?.score?.hrv_rmssd_milli    ?? null;
+      const recoveryScore    = rec?.score?.recovery_score      ?? null;
+      const restingHeartRate = rec?.score?.resting_heart_rate  ?? null;
 
       let sleepHours: number | null = null;
+      let remMins: number | null    = null;
+      let deepMins: number | null   = null;
+      let lightMins: number | null  = null;
       if (sleep?.score?.stage_summary) {
         const s = sleep.score.stage_summary;
         const asleepMs = Math.max(
@@ -207,10 +219,16 @@ export async function POST(request: Request) {
           s.total_no_data_time_milli,
         );
         sleepHours = Math.round((asleepMs / 3_600_000) * 10) / 10;
+        remMins    = Math.round(s.total_rem_sleep_time_milli       / 60_000);
+        deepMins   = Math.round(s.total_slow_wave_sleep_time_milli / 60_000);
+        lightMins  = Math.round(s.total_light_sleep_time_milli     / 60_000);
       }
       const sleepScore = sleep?.score?.sleep_performance_percentage ?? null;
 
-      const strain       = cycle?.score?.strain ?? null;
+      const strain   = cycle?.score?.strain    ?? null;
+      const kjCalories = cycle?.score?.kilojoule ?? null;
+      // Convert kilojoules → kcal (1 kJ = 0.239 kcal)
+      const calories = kjCalories !== null ? Math.round(kjCalories * 0.239) : null;
       const activeEnergy = strain !== null ? Math.round(strain * 500) : null;
 
       rows.push({
@@ -219,8 +237,13 @@ export async function POST(request: Request) {
         sleep_hours:          sleepHours,
         sleep_quality:        sleepQuality(sleepScore),
         hrv_avg:              hrv !== null ? Math.round(hrv) : null,
+        resting_heart_rate:   restingHeartRate !== null ? Math.round(restingHeartRate) : null,
         stress_level:         stressLevel(hrv),
         active_energy:        activeEnergy,
+        whoop_calories:       calories,
+        whoop_rem_mins:       remMins,
+        whoop_deep_mins:      deepMins,
+        whoop_light_mins:     lightMins,
         workout_minutes:      null,
         source_device:        "whoop",
         whoop_recovery_score: recoveryScore,
