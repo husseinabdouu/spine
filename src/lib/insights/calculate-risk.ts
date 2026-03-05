@@ -40,14 +40,13 @@ export async function calculateBehavioralRisk(
     .lte('date', targetDate)
     .order('date', { ascending: false });
 
-  if (healthError || !healthData || healthData.length < 3) {
+  if (healthError || !healthData || healthData.length < 1) {
     return null;
   }
 
-  const targetDayHealth = healthData.find((h) => h.date === targetDate);
-  if (!targetDayHealth) {
-    return null;
-  }
+  // Use the requested date's data, or fall back to the most recent available day
+  const targetDayHealth =
+    healthData.find((h) => h.date === targetDate) ?? healthData[0];
 
   const sleepHours = targetDayHealth.sleep_hours ?? 0;
   const hrv = targetDayHealth.hrv_avg ?? 0;

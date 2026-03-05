@@ -10,6 +10,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing user_id' }, { status: 400 });
     }
 
+    // Default to today; if no health data exists for today, the risk engine
+    // will automatically fall back to the most recent available day
     const targetDate = date ?? new Date().toISOString().split('T')[0];
     const supabase = await createClient();
 
