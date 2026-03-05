@@ -154,7 +154,8 @@ export default function HealthPage() {
   const loadData = useCallback(async (uid: string, r: Range) => {
     setLoading(true);
     const fromDate = r === "all" ? "2000-01-01"
-      : format(subDays(new Date(), r === "1" ? 1 : parseInt(r)), "yyyy-MM-dd");
+      : r === "1" ? format(new Date(), "yyyy-MM-dd")
+      : format(subDays(new Date(), parseInt(r)), "yyyy-MM-dd");
 
     const [{ data: hData }, { data: sData }] = await Promise.all([
       supabase
@@ -226,8 +227,15 @@ export default function HealthPage() {
   const deepVals     = health.map(h => h.whoop_deep_mins);
   const lightVals    = health.map(h => h.whoop_light_mins);
 
-  const rangeLbl = range === "1" ? "today" : range === "all" ? "all-time avg"
+  const isToday  = range === "1";
+  const rangeLbl = isToday ? "today" : range === "all" ? "all-time avg"
     : range === "7" ? "7d avg" : `${range}d avg`;
+
+  // For the "Today" view show direct values, not averages
+  const todayRow = isToday ? (health.find(h => h.date === format(new Date(), "yyyy-MM-dd")) ?? health.at(-1) ?? null) : null;
+  function displayVal(rangeAvg: number | null, todayField: number | null): number | null {
+    return isToday ? todayField : rangeAvg;
+  }
 
   // ─── Charts ──────────────────────────────────────────────────────────────────
 
@@ -301,7 +309,7 @@ export default function HealthPage() {
                   onClick={() => setRange(r)}
                   className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${range === r ? "bg-[var(--gold)] text-black" : "text-[var(--text-dim)] hover:text-white"}`}
                 >
-                  {r === "all" ? "All" : r === "1" ? "1d" : `${r}d`}
+                  {r === "all" ? "All" : r === "1" ? "Today" : `${r}d`}
                 </button>
               ))}
             </div>
@@ -329,14 +337,14 @@ export default function HealthPage() {
             {/* ── 8 metric cards ── */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: "Recovery",  val: avg(recoveryVals), unit: "%",   color: rColor(avg(recoveryVals)), Icon: Activity, trend: trendDir(recoveryVals) },
-                { label: "HRV",       val: avg(hrvVals),      unit: " ms", color: "#818cf8",                 Icon: Heart,    trend: trendDir(hrvVals) },
-                { label: "RHR",       val: avg(rhrVals),      unit: " bpm",color: "#f87171",                 Icon: Heart,    trend: trendDir(rhrVals.map(v => v !== null ? -v : null)) },
-                { label: "Sleep",     val: avg(sleepVals),    unit: "h",   color: "#38bdf8",                 Icon: Moon,     trend: trendDir(sleepVals) },
-                { label: "Strain",    val: avg(strainVals),   unit: "",    color: "#fb923c",                 Icon: Zap,      trend: trendDir(strainVals) },
-                { label: "Calories",  val: avg(calVals),      unit: " cal",color: "#fbbf24",                 Icon: Flame,    trend: trendDir(calVals) },
-                { label: "REM",       val: avg(remVals),      unit: " min",color: "#a78bfa",                 Icon: Wind,     trend: trendDir(remVals) },
-                { label: "Deep",      val: avg(deepVals),     unit: " min",color: "#34d399",                 Icon: Moon,     trend: trendDir(deepVals) },
+                { label: "Recovery",  val: displayVal(avg(recoveryVals), todayRow?.whoop_recovery_score ?? null), unit: "%",    color: rColor(displayVal(avg(recoveryVals), todayRow?.whoop_recovery_score ?? null)), Icon: Activity, trend: trendDir(recoveryVals) },
+                { label: "HRV",       val: displayVal(avg(hrvVals),      todayRow?.hrv_avg              ?? null), unit: " ms",  color: "#818cf8", Icon: Heart,  trend: trendDir(hrvVals) },
+                { label: "RHR",       val: displayVal(avg(rhrVals),      todayRow?.resting_heart_rate   ?? null), unit: " bpm", color: "#f87171", Icon: Heart,  trend: trendDir(rhrVals.map(v => v !== null ? -v : null)) },
+                { label: "Sleep",     val: displayVal(avg(sleepVals),    todayRow?.sleep_hours          ?? null), unit: "h",    color: "#38bdf8", Icon: Moon,   trend: trendDir(sleepVals) },
+                { label: "Strain",    val: displayVal(avg(strainVals),   todayRow?.whoop_strain         ?? null), unit: "",     color: "#fb923c", Icon: Zap,    trend: trendDir(strainVals) },
+                { label: "Calories",  val: displayVal(avg(calVals),      todayRow?.whoop_calories       ?? null), unit: " cal", color: "#fbbf24", Icon: Flame,  trend: trendDir(calVals) },
+                { label: "REM",       val: displayVal(avg(remVals),      todayRow?.whoop_rem_mins       ?? null), unit: " min", color: "#a78bfa", Icon: Wind,   trend: trendDir(remVals) },
+                { label: "Deep",      val: displayVal(avg(deepVals),     todayRow?.whoop_deep_mins      ?? null), unit: " min", color: "#34d399", Icon: Moon,   trend: trendDir(deepVals) },
               ].map(({ label, val, unit, color, Icon, trend }) => (
                 <div key={label} className={`${CARD} p-4`}>
                   <div className="flex items-center justify-between mb-1.5">
@@ -344,7 +352,7 @@ export default function HealthPage() {
                       <Icon className="w-3.5 h-3.5" style={{ color }} />
                       <span className="text-[10px] font-semibold text-[var(--text-dim)] uppercase tracking-wider">{label}</span>
                     </div>
-                    <TrendBadge dir={trend} />
+                    {!isToday && <TrendBadge dir={trend} />}
                   </div>
                   <div className="text-xl font-bold" style={{ color }}>
                     {val !== null ? `${val}${unit}` : "—"}
