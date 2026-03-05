@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import PlaidLink from "@/components/PlaidLink";
 import AppShell from "@/components/AppShell";
@@ -18,6 +18,8 @@ import {
   Check,
   ExternalLink,
   Smartphone,
+  RefreshCw,
+  Zap,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
@@ -36,22 +38,59 @@ type HealthData = {
   created_at: string;
 };
 
+type WhoopConnection = {
+  whoop_user_id: number | null;
+  updated_at: string;
+};
+
 const CARD = "rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]";
 const SHORTCUT_URL = "https://spine-one.vercel.app/api/health/submit";
 
 export default function SettingsPage() {
-  const router = useRouter();
-  const { toast } = useToast();
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [memberSince, setMemberSince] = useState<string | null>(null);
-  const [plaidItems, setPlaidItems] = useState<PlaidItem[]>([]);
-  const [latestHealth, setLatestHealth] = useState<HealthData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [disconnecting, setDisconnecting] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  return (
+    <Suspense>
+      <SettingsPageInner />
+    </Suspense>
+  );
+}
+
+function SettingsPageInner() {
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const { toast }    = useToast();
+  const [userEmail, setUserEmail]           = useState<string | null>(null);
+  const [userId, setUserId]                 = useState<string | null>(null);
+  const [memberSince, setMemberSince]       = useState<string | null>(null);
+  const [plaidItems, setPlaidItems]         = useState<PlaidItem[]>([]);
+  const [latestHealth, setLatestHealth]     = useState<HealthData | null>(null);
+  const [whoopConn, setWhoopConn]           = useState<WhoopConnection | null>(null);
+  const [whoopSyncing, setWhoopSyncing]     = useState(false);
+  const [disconnectingWhoop, setDisconnectingWhoop] = useState(false);
+  const [loading, setLoading]               = useState(true);
+  const [disconnecting, setDisconnecting]   = useState<string | null>(null);
+  const [copied, setCopied]                 = useState(false);
 
   useEffect(() => { loadAll(); }, []);
+
+  // Handle OAuth return params
+  useEffect(() => {
+    const whoop = searchParams.get("whoop");
+    const error = searchParams.get("error");
+    if (whoop === "connected") {
+      toast("Whoop connected! Syncing yesterday's data…", "success");
+      // Remove params from URL
+      router.replace("/settings");
+    } else if (error?.startsWith("whoop")) {
+      const msgs: Record<string, string> = {
+        whoop_denied:        "Whoop authorisation was cancelled.",
+        whoop_failed:        "Failed to connect Whoop. Please try again.",
+        whoop_db_error:      "Could not save Whoop connection.",
+        whoop_invalid_state: "Invalid OAuth state. Please try again.",
+      };
+      toast(msgs[error] ?? "Whoop connection error.", "error");
+      router.replace("/settings");
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAll() {
     const { data } = await supabase.auth.getSession();
@@ -60,7 +99,7 @@ export default function SettingsPage() {
     setUserEmail(user.email || null);
     setUserId(user.id);
     setMemberSince(user.created_at);
-    await Promise.all([loadPlaidItems(), loadLatestHealth(user.id)]);
+    await Promise.all([loadPlaidItems(), loadLatestHealth(user.id), loadWhoopConnection()]);
     setLoading(false);
   }
 
@@ -71,6 +110,14 @@ export default function SettingsPage() {
       .order("created_at", { ascending: false });
     if (data) setPlaidItems(data);
   }, []);
+
+  async function loadWhoopConnection() {
+    const { data } = await supabase
+      .from("whoop_connections")
+      .select("whoop_user_id, updated_at")
+      .single();
+    setWhoopConn(data ?? null);
+  }
 
   async function loadLatestHealth(uid: string) {
     const { data } = await supabase
@@ -113,6 +160,44 @@ export default function SettingsPage() {
   function handlePlaidSuccess() {
     toast("Bank connected! Fetching transaction history…", "success");
     loadPlaidItems();
+  }
+
+  async function syncWhoop() {
+    if (!userId) return;
+    setWhoopSyncing(true);
+    try {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const dateStr = yesterday.toISOString().split("T")[0];
+      const res  = await fetch("/api/whoop/sync", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ user_id: userId, date: dateStr }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast("Whoop data synced!", "success");
+        loadLatestHealth(userId);
+      } else {
+        toast(data.error ?? "Sync failed", "error");
+      }
+    } catch {
+      toast("Whoop sync failed", "error");
+    }
+    setWhoopSyncing(false);
+  }
+
+  async function disconnectWhoop() {
+    setDisconnectingWhoop(true);
+    try {
+      const { error } = await supabase.from("whoop_connections").delete().neq("id", "");
+      if (error) throw error;
+      setWhoopConn(null);
+      toast("Whoop disconnected", "info");
+    } catch {
+      toast("Failed to disconnect Whoop", "error");
+    }
+    setDisconnectingWhoop(false);
   }
 
   async function copyUrl() {
@@ -307,6 +392,72 @@ export default function SettingsPage() {
               <ExternalLink className="w-3 h-3" />
             </a>
           </div>
+        </section>
+
+        {/* ── Whoop ────────────────────────────────────────────────────────── */}
+        <section className={`${CARD} p-6`}>
+          <div className="flex items-center gap-3 mb-5">
+            <Zap className="w-4 h-4 text-[var(--text-muted)]" />
+            <h2 className="text-sm font-semibold text-[var(--text-dim)] uppercase tracking-widest">Whoop</h2>
+          </div>
+
+          {whoopConn ? (
+            <div className="space-y-4">
+              {/* Connected status */}
+              <div className="flex items-start gap-3 p-4 rounded-lg bg-white/[0.03] border border-[var(--border)]">
+                <CheckCircle className="w-4 h-4 text-[var(--safe)] mt-0.5 shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-[var(--text)]">Whoop connected</div>
+                  {whoopConn.updated_at && (
+                    <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                      Last synced {format(parseISO(whoopConn.updated_at), "MMM d, yyyy 'at' h:mm a")}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={syncWhoop}
+                  disabled={whoopSyncing}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-sm text-[var(--text-dim)] disabled:opacity-40 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${whoopSyncing ? "animate-spin" : ""}`} />
+                  {whoopSyncing ? "Syncing…" : "Sync now"}
+                </button>
+                <button
+                  onClick={disconnectWhoop}
+                  disabled={disconnectingWhoop}
+                  className="text-xs text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors disabled:opacity-40"
+                >
+                  {disconnectingWhoop ? "Disconnecting…" : "Disconnect"}
+                </button>
+              </div>
+
+              <p className="text-xs text-[var(--text-muted)]">
+                Recovery, sleep, and strain data syncs automatically via Whoop webhooks. Use "Sync now" to pull the latest manually.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-[var(--text-dim)]">
+                Connect your Whoop to automatically sync recovery score, HRV, sleep performance, and strain into Spine.
+              </p>
+              <button
+                onClick={() => {
+                  if (userId) window.location.href = `/api/whoop/auth?user_id=${userId}`;
+                }}
+                disabled={!userId}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00D4A4] hover:opacity-90 disabled:opacity-40 text-black text-sm font-bold transition-opacity"
+              >
+                <Zap className="w-4 h-4" />
+                Connect Whoop
+              </button>
+              <p className="text-xs text-[var(--text-muted)]">
+                You&apos;ll be redirected to Whoop to authorise access. Spine requests read-only permissions for recovery, sleep, and activity data.
+              </p>
+            </div>
+          )}
         </section>
 
         {/* ── Privacy & Legal ──────────────────────────────────────────────── */}
