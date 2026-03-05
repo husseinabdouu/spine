@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     const recentHistory = history.slice(-10);
     const messages = [
       ...recentHistory.map((m: { role: string; content: string }) => ({
-        role: (m.role === 'backbone' ? 'assistant' : 'user') as 'user' | 'assistant',
+        role: (m.role === 'backbone' || m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
         content: m.content,
       })),
       { role: 'user' as const, content: message },

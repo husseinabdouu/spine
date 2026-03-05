@@ -8,8 +8,15 @@ import ReactMarkdown from "react-markdown";
 import { Moon, Heart, Activity, Send, RefreshCw } from "lucide-react";
 
 interface Message {
-  role: "user" | "backbone";
+  role: "user" | "assistant";
   content: string;
+}
+
+interface ConvMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
 }
 
 interface BehavioralInsight {
@@ -101,7 +108,7 @@ function RiskGauge({ score }: { score: number }) {
 
 export default function InsightsPage() {
   const router = useRouter();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ConvMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [calculating, setCalculating] = useState(false);
@@ -117,12 +124,21 @@ export default function InsightsPage() {
   useEffect(() => { checkAuth(); }, []);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+  async function loadMessages() {
+    const { data } = await supabase
+      .from("backbone_conversations")
+      .select("id, role, content, created_at")
+      .order("created_at", { ascending: true });
+    if (data) setMessages(data as ConvMessage[]);
+    return (data ?? []) as ConvMessage[];
+  }
+
   async function checkAuth() {
     const { data } = await supabase.auth.getSession();
     if (!data.session) { router.push("/setup"); return; }
     setUserEmail(data.session.user.email || null);
     setUserId(data.session.user.id);
-    await loadData();
+    await Promise.all([loadData(), loadMessages()]);
     setDataLoaded(true);
   }
 
@@ -165,9 +181,15 @@ export default function InsightsPage() {
     const token = sessionData.session?.access_token;
     if (!token) { router.push("/setup"); return; }
 
-    setMessages(prev => [...prev, { role: "user", content: text }]);
     setInput("");
     setIsLoading(true);
+
+    // Persist user message to DB, then reload
+    const uid = (await supabase.auth.getSession()).data.session?.user.id;
+    if (uid) {
+      await supabase.from("backbone_conversations").insert({ user_id: uid, role: "user", content: text });
+    }
+    await loadMessages();
 
     try {
       const res = await fetch("/api/backbone/chat", {
@@ -175,17 +197,20 @@ export default function InsightsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           message: text,
-          conversationHistory: messages.map(m => ({ role: m.role, content: m.content })),
+          conversationHistory: messages.slice(-10).map(m => ({ role: m.role, content: m.content })),
         }),
       });
       const data = await res.json();
-      setMessages(prev => [...prev, {
-        role: "backbone",
-        content: data.response ?? "Backbone is unavailable right now.",
-      }]);
+      const reply = data.response ?? "Backbone is unavailable right now.";
+      if (uid) {
+        await supabase.from("backbone_conversations").insert({ user_id: uid, role: "assistant", content: reply });
+      }
     } catch {
-      setMessages(prev => [...prev, { role: "backbone", content: "Backbone is unavailable right now. Try again in a moment." }]);
+      if (uid) {
+        await supabase.from("backbone_conversations").insert({ user_id: uid, role: "assistant", content: "Backbone is unavailable right now. Try again in a moment." });
+      }
     }
+    await loadMessages();
     setIsLoading(false);
   }
 
@@ -363,8 +388,8 @@ export default function InsightsPage() {
               </div>
             )}
 
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div
                   className={`max-w-[88%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                     msg.role === "user"
@@ -372,7 +397,7 @@ export default function InsightsPage() {
                       : "bg-[var(--glass-subtle)] border border-[var(--glass-border)] text-[var(--text)] rounded-bl-sm"
                   }`}
                 >
-                  {msg.role === "backbone" ? (
+                  {msg.role === "assistant" ? (
                     <div className="prose prose-sm prose-invert max-w-none [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:mb-2 [&>ul]:pl-4 [&>ul>li]:mb-0.5">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -27,6 +27,7 @@ import {
   CheckCircle,
   Circle,
   ChevronRight,
+  Send,
 } from "lucide-react";
 
 ChartJS.register(
@@ -69,6 +70,13 @@ type InsightRow = {
     prev_7_days: string;
     change_percent: string;
   };
+};
+
+type ConvMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
 };
 
 // ── Constants & helpers ───────────────────────────────────────────────────────
@@ -142,8 +150,27 @@ export default function DashboardPage() {
   const [disconnecting,   setDisconnecting]   = useState<string | null>(null);
   const [calculating,     setCalculating]     = useState(false);
   const [insightsTab,     setInsightsTab]     = useState<"today" | "week">("today");
+  const [miniMessages,    setMiniMessages]    = useState<ConvMessage[]>([]);
+  const [miniInput,       setMiniInput]       = useState("");
+  const [miniLoading,     setMiniLoading]     = useState(false);
+  const miniBottomRef       = useRef<HTMLDivElement>(null);
+  const hasGeneratedOpening = useRef(false);
 
-  useEffect(() => { checkAuth(); }, []);
+  useEffect(() => { checkAuth(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-generate Backbone opening when data is loaded but conversation is empty
+  useEffect(() => {
+    if (!authChecked || !userId || hasGeneratedOpening.current) return;
+    if (miniMessages.length === 0 && (healthHistory.length > 0 || insightsHistory.length > 0)) {
+      hasGeneratedOpening.current = true;
+      generateOpening();
+    }
+  }, [authChecked, userId, miniMessages.length, healthHistory.length, insightsHistory.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scroll mini chat to bottom when messages update
+  useEffect(() => {
+    miniBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [miniMessages]);
 
   async function checkAuth() {
     const { data } = await supabase.auth.getSession();
@@ -152,6 +179,7 @@ export default function DashboardPage() {
     setUserId(data.session.user.id);
     setAuthChecked(true);
     await Promise.all([
+      loadConversation(),
       loadTransactions(),
       loadPlaidItems(),
       loadHealthData(),
@@ -269,6 +297,79 @@ export default function DashboardPage() {
     setDisconnecting(null);
   }
 
+  async function loadConversation() {
+    const { data } = await supabase
+      .from("backbone_conversations")
+      .select("id, role, content, created_at")
+      .order("created_at", { ascending: true });
+    setMiniMessages((data ?? []) as ConvMessage[]);
+  }
+
+  async function generateOpening() {
+    if (!userId) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+    setMiniLoading(true);
+    const parts: string[] = [];
+    if (todayHealth?.whoop_recovery_score != null) parts.push(`Recovery ${todayHealth.whoop_recovery_score}%`);
+    if (todayHealth?.hrv_avg != null)              parts.push(`HRV ${todayHealth.hrv_avg}ms`);
+    if (todayHealth?.sleep_hours != null)          parts.push(`Sleep ${todayHealth.sleep_hours.toFixed(1)}h`);
+    if (rScore != null)                            parts.push(`Risk score ${rScore}/100 (${riskLabel(rScore)} risk)`);
+    if (todayInsight?.spending_summary?.change_percent) {
+      const pct = parseFloat(todayInsight.spending_summary.change_percent);
+      if (!isNaN(pct)) parts.push(`Spending ${pct > 0 ? "up" : "down"} ${Math.abs(Math.round(pct))}% vs last week`);
+    }
+    const openingPrompt = parts.length > 0
+      ? `Based on my data today (${parts.join(", ")}), give me a brief 1-2 sentence check-in with the single most important insight. End with one short question.`
+      : "Give me a brief welcome message. Ask what I want to explore today.";
+    try {
+      const res = await fetch("/api/backbone/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message: openingPrompt, conversationHistory: [] }),
+      });
+      const data = await res.json();
+      if (data.response) {
+        await supabase.from("backbone_conversations").insert({
+          user_id: userId,
+          role: "assistant",
+          content: data.response,
+        });
+        await loadConversation();
+      }
+    } catch { /* silent fail */ }
+    setMiniLoading(false);
+  }
+
+  async function sendMiniChat(text: string) {
+    if (!text.trim() || miniLoading || !userId) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+    setMiniInput("");
+    setMiniLoading(true);
+    await supabase.from("backbone_conversations").insert({ user_id: userId, role: "user", content: text });
+    await loadConversation();
+    try {
+      const res = await fetch("/api/backbone/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          message: text,
+          conversationHistory: miniMessages.slice(-10).map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json();
+      const reply = data.response ?? "Backbone is unavailable right now.";
+      await supabase.from("backbone_conversations").insert({ user_id: userId, role: "assistant", content: reply });
+    } catch {
+      await supabase.from("backbone_conversations").insert({ user_id: userId, role: "assistant", content: "Backbone is unavailable right now. Try again in a moment." });
+    }
+    await loadConversation();
+    setMiniLoading(false);
+  }
+
   async function logout() {
     await supabase.auth.signOut();
     router.push("/setup");
@@ -369,15 +470,44 @@ export default function DashboardPage() {
     return { txs, avgSpend };
   }, [todayInsight, insightsHistory, transactions, today]);
 
-  // This Week summary
+  // This Week summary — extended with tax, trigger, and spend trend
   const weekInsights = useMemo(() => {
     const cutoff = format(subDays(new Date(), 7), "yyyy-MM-dd");
     const last7  = insightsHistory.filter(i => i.date >= cutoff);
     if (!last7.length) return null;
     const best  = last7.reduce<InsightRow | null>((b, i) => !b || i.risk_score < b.risk_score ? i : b, null);
     const worst = last7.reduce<InsightRow | null>((w, i) => !w || i.risk_score > w.risk_score ? i : w, null);
-    return { best, worst, highRiskCount: last7.filter(i => i.risk_score > 30).length };
-  }, [insightsHistory]);
+    const lowCount      = last7.filter(i => i.risk_score <= 30).length;
+    const highRiskCount = last7.filter(i => i.risk_score > 30).length;
+    const highCount     = last7.filter(i => i.risk_score > 60).length;
+
+    // Spending trend from the most recent insight
+    const rawPct = last7[0]?.spending_summary?.change_percent;
+    const spendChangePct = rawPct ? parseFloat(rawPct) : null;
+
+    // Weekly behavioral tax: sum of (daily spend - baseline) on elevated days
+    const elevated = new Set(last7.filter(i => i.risk_score > 30).map(i => i.date));
+    const byDay: Record<string, number> = {};
+    for (const t of transactions) {
+      const d = String(t.posted_at).slice(0, 10);
+      if (t.amount_cents > 0 && d >= cutoff && elevated.has(d))
+        byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
+    }
+    const weekTax = Object.values(byDay).reduce((s, v) => s + Math.max(0, v - (baseline || 0)), 0);
+
+    // Most common trigger: infer from health data this week
+    const sleepRows = healthHistory.filter(r => r.sleep_hours != null && r.date >= cutoff);
+    const hrvRows   = healthHistory.filter(r => r.hrv_avg   != null && r.date >= cutoff);
+    const avgSleep  = sleepRows.length ? sleepRows.reduce((s, r) => s + (r.sleep_hours ?? 0), 0) / sleepRows.length : null;
+    const avgHrv    = hrvRows.length   ? hrvRows.reduce((s, r)   => s + (r.hrv_avg    ?? 0), 0) / hrvRows.length   : null;
+    let trigger: string | null = null;
+    if (highRiskCount > 0) {
+      if (avgSleep != null && avgSleep < 6.5)   trigger = `poor sleep (avg ${avgSleep.toFixed(1)}h this week)`;
+      else if (avgHrv != null && avgHrv < 45)   trigger = `elevated stress (avg HRV ${Math.round(avgHrv)}ms this week)`;
+    }
+
+    return { best, worst, lowCount, highCount, highRiskCount, spendChangePct, weekTax, trigger, dayCount: last7.length };
+  }, [insightsHistory, transactions, baseline, healthHistory]);
 
   // 7-day health trend (recovery or HRV)
   const healthTrend = useMemo(() => {
@@ -434,45 +564,70 @@ export default function DashboardPage() {
     return b.slice(0, 3);
   }, [todayHealth, todayInsight]);
 
-  // Forward-looking actionable advice for the Today tab (distinct from hero bullets)
+  // Forward-looking actionable advice for the Today tab — 4–5 insights covering different angles
   const todayAdvice = useMemo(() => {
-    if (!todayInsight) return [];
-    const level = riskLevel(todayInsight.risk_score);
-    const advice: string[] = [];
-    const extraSpend =
-      daysLikeTodayData.avgSpend > 0 && baseline > 0
-        ? Math.max(0, daysLikeTodayData.avgSpend - baseline)
-        : 0;
+    const items: string[] = [];
 
-    if (level === "LOW") {
-      advice.push("Good day to make any planned purchases — you're in baseline mode today.");
-      if (todayHealth?.sleep_hours != null && todayHealth.sleep_hours >= 7)
-        advice.push(`Well rested at ${todayHealth.sleep_hours.toFixed(1)}h — your decision-making is sharp.`);
-      else if (todayHealth?.hrv_avg != null && todayHealth.hrv_avg >= 55)
-        advice.push(`HRV ${todayHealth.hrv_avg}ms — stress is low, spending risk is low.`);
-    } else if (level === "MEDIUM") {
-      advice.push(
-        extraSpend > 0
-          ? `Based on your history, you may spend $${extraSpend.toFixed(0)} extra today — one trigger is active.`
-          : "One trigger active today — consider avoiding impulse purchases this afternoon.",
-      );
-      if (todayHealth?.hrv_avg != null && todayHealth.hrv_avg < 50)
-        advice.push(`HRV at ${todayHealth.hrv_avg}ms — slightly stressed. Delay big purchases if you can.`);
-      else if (todayHealth?.sleep_hours != null && todayHealth.sleep_hours < 7)
-        advice.push(`Slept ${todayHealth.sleep_hours.toFixed(1)}h last night — fatigue can reduce spending willpower.`);
-    } else {
-      advice.push(
-        extraSpend > 0
-          ? `High risk day — based on your history you may spend $${extraSpend.toFixed(0)} extra. Watch food delivery and shopping.`
-          : "High risk day — watch food delivery and impulse shopping today.",
-      );
-      if (todayHealth?.sleep_hours != null && todayHealth.sleep_hours < 6)
-        advice.push(`Only ${todayHealth.sleep_hours.toFixed(1)}h of sleep — poor sleep spikes impulse spending.`);
-      else if (todayHealth?.hrv_avg != null && todayHealth.hrv_avg < 40)
-        advice.push(`HRV ${todayHealth.hrv_avg}ms — high stress detected. Delay discretionary purchases if possible.`);
+    // 1. Sleep
+    if (todayHealth?.sleep_hours != null) {
+      const h = todayHealth.sleep_hours;
+      if (h >= 7)      items.push(`Slept ${h.toFixed(1)}h — above your 7h target, decision-making is sharp today`);
+      else if (h >= 6) items.push(`Slept ${h.toFixed(1)}h — slightly under target, mild fatigue may affect choices`);
+      else             items.push(`Slept ${h.toFixed(1)}h — below your 7h target, fatigue is active today`);
     }
-    return advice.slice(0, 3);
-  }, [todayInsight, todayHealth, daysLikeTodayData.avgSpend, baseline]);
+
+    // 2. HRV
+    if (todayHealth?.hrv_avg != null) {
+      const hrv = todayHealth.hrv_avg;
+      if (hrv >= 70)      items.push(`HRV ${hrv}ms — well recovered, stress levels are low`);
+      else if (hrv >= 50) items.push(`HRV ${hrv}ms — normal range, moderate readiness`);
+      else if (hrv >= 35) items.push(`HRV ${hrv}ms — elevated stress, spending willpower may be reduced`);
+      else                items.push(`HRV ${hrv}ms — high stress, delay big purchases today if possible`);
+    }
+
+    // 3. Spending trend vs last week
+    if (todayInsight?.spending_summary?.change_percent) {
+      const pct = parseFloat(todayInsight.spending_summary.change_percent);
+      if (!isNaN(pct)) {
+        if (Math.abs(pct) < 5)  items.push("Spending on track vs last week — no significant shift");
+        else if (pct > 0)        items.push(`Spending up ${Math.round(pct)}% vs last week — above your usual pattern`);
+        else                     items.push(`Spending down ${Math.abs(Math.round(pct))}% vs last week — on track`);
+      }
+    }
+
+    // 4. Today's risk prediction
+    if (todayInsight) {
+      const level = riskLevel(todayInsight.risk_score);
+      const extra = daysLikeTodayData.avgSpend > 0 && baseline > 0
+        ? Math.max(0, daysLikeTodayData.avgSpend - baseline) : 0;
+      if (level === "LOW")
+        items.push(`${todayInsight.risk_score}/100 risk — good time for any planned purchases`);
+      else if (level === "MEDIUM")
+        items.push(extra > 0
+          ? `${todayInsight.risk_score}/100 risk — history shows $${extra.toFixed(0)} extra spend on days like this`
+          : `${todayInsight.risk_score}/100 risk — one trigger active, be mindful of impulse purchases`);
+      else
+        items.push(extra > 0
+          ? `${todayInsight.risk_score}/100 risk — high alert, you may spend $${extra.toFixed(0)} extra today`
+          : `${todayInsight.risk_score}/100 risk — high alert, watch food delivery and discretionary spending`);
+    }
+
+    // 5. This week's risk pattern
+    const weekCutoff = format(subDays(new Date(), 7), "yyyy-MM-dd");
+    const last7 = insightsHistory.filter(i => i.date >= weekCutoff);
+    if (last7.length >= 2) {
+      const lowCount  = last7.filter(i => i.risk_score <= 30).length;
+      const highCount = last7.filter(i => i.risk_score > 60).length;
+      if (lowCount >= 3)
+        items.push(`${lowCount} low risk days this week — your best streak this month`);
+      else if (highCount >= 3)
+        items.push(`${highCount} high risk days this week — rest is the highest leverage action right now`);
+      else
+        items.push(`${lowCount} low risk day${lowCount !== 1 ? "s" : ""} out of ${last7.length} this week — ${lowCount >= Math.ceil(last7.length / 2) ? "solid week so far" : "room to improve"}`);
+    }
+
+    return items.slice(0, 5);
+  }, [todayInsight, todayHealth, daysLikeTodayData.avgSpend, baseline, insightsHistory]);
 
   const setupComplete = plaidItems.length > 0 && healthHistory.length > 0 && insightsHistory.length > 0;
 
@@ -588,7 +743,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════════
-          ZONE 2 — Insights strip
+          ZONE 2 — Insights strip + mini Backbone chat
       ════════════════════════════════════════════════════════════════════════ */}
       <div className={`${CARD} p-5 mb-4`}>
 
@@ -610,7 +765,7 @@ export default function DashboardPage() {
         </div>
 
         {insightsTab === "today" ? (
-          <div className="space-y-2">
+          <div className="space-y-2 mb-4">
             {todayAdvice.length > 0 ? (
               todayAdvice.map((s, i) => (
                 <div
@@ -628,41 +783,64 @@ export default function DashboardPage() {
                   : "Advice will appear once today's risk score is available."}
               </p>
             )}
-            <Link
-              href="/insights"
-              className="inline-flex items-center gap-1 text-xs text-[var(--gold)] hover:opacity-75 transition-opacity mt-2"
-            >
-              Ask Backbone a question <ArrowUpRight className="w-3 h-3" />
-            </Link>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 mb-4">
             {weekInsights ? (
               <>
+                {/* Best day */}
                 {weekInsights.best && (
                   <div className="flex gap-2.5 items-start px-3.5 py-2.5 rounded-lg bg-[var(--safe-dim)] border border-[var(--safe)]/20">
                     <span className="text-[var(--safe)] shrink-0 mt-0.5">↑</span>
                     <span className="text-sm text-[var(--text)]">
-                      Best day: <strong>{format(parseLocalDate(weekInsights.best.date), "EEEE")}</strong>
+                      Best day: <strong>{format(parseLocalDate(weekInsights.best.date), "EEEE, MMM d")}</strong>
                       {" "}— {riskLabel(weekInsights.best.risk_score)} risk ({weekInsights.best.risk_score}/100)
                     </span>
                   </div>
                 )}
+                {/* Worst day */}
                 {weekInsights.worst && weekInsights.worst.date !== weekInsights.best?.date && (
                   <div className="flex gap-2.5 items-start px-3.5 py-2.5 rounded-lg bg-[var(--warn-dim)] border border-[var(--warn)]/20">
                     <span className="text-[var(--warn)] shrink-0 mt-0.5">↓</span>
                     <span className="text-sm text-[var(--text)]">
-                      Hardest day: <strong>{format(parseLocalDate(weekInsights.worst.date), "EEEE")}</strong>
+                      Hardest day: <strong>{format(parseLocalDate(weekInsights.worst.date), "EEEE, MMM d")}</strong>
                       {" "}— {riskLabel(weekInsights.worst.risk_score)} risk ({weekInsights.worst.risk_score}/100)
                     </span>
                   </div>
                 )}
+                {/* Behavioral tax this week */}
                 <div className="flex gap-2.5 items-start px-3.5 py-2.5 rounded-lg bg-[var(--glass-subtle)] border border-[var(--border)]">
-                  <span className="text-[var(--text-muted)] shrink-0 mt-0.5">→</span>
+                  <span className={weekInsights.weekTax > 5 ? "text-[var(--danger)] shrink-0 mt-0.5" : "text-[var(--safe)] shrink-0 mt-0.5"}>→</span>
                   <span className="text-sm text-[var(--text)]">
-                    {weekInsights.highRiskCount === 0
-                      ? "All low-risk this week — solid baseline, keep it up."
-                      : `${weekInsights.highRiskCount} elevated-risk day${weekInsights.highRiskCount !== 1 ? "s" : ""} this week — watch discretionary purchases on those days.`}
+                    {weekInsights.weekTax > 5
+                      ? `Behavioral tax this week: $${weekInsights.weekTax.toFixed(0)} above baseline`
+                      : "Behavioral tax this week: within baseline — no significant overspend"}
+                  </span>
+                </div>
+                {/* Spending trend */}
+                {weekInsights.spendChangePct != null && !isNaN(weekInsights.spendChangePct) && (
+                  <div className="flex gap-2.5 items-start px-3.5 py-2.5 rounded-lg bg-[var(--glass-subtle)] border border-[var(--border)]">
+                    <span className={weekInsights.spendChangePct <= 0 ? "text-[var(--safe)] shrink-0 mt-0.5" : "text-[var(--danger)] shrink-0 mt-0.5"}>
+                      {weekInsights.spendChangePct <= 0 ? "↓" : "↑"}
+                    </span>
+                    <span className="text-sm text-[var(--text)]">
+                      {Math.abs(weekInsights.spendChangePct) < 5
+                        ? "Spending on track vs last week — no significant change"
+                        : weekInsights.spendChangePct > 0
+                          ? `Spending up ${Math.round(weekInsights.spendChangePct)}% vs last week — above previous pace`
+                          : `Spending down ${Math.abs(Math.round(weekInsights.spendChangePct))}% vs last week — below previous pace`}
+                    </span>
+                  </div>
+                )}
+                {/* Main trigger or forward-looking suggestion */}
+                <div className="flex gap-2.5 items-start px-3.5 py-2.5 rounded-lg bg-[var(--glass-subtle)] border border-[var(--border)]">
+                  <span className="text-[var(--gold)] shrink-0 mt-0.5">→</span>
+                  <span className="text-sm text-[var(--text)]">
+                    {weekInsights.trigger
+                      ? `Main trigger this week: ${weekInsights.trigger}`
+                      : weekInsights.lowCount >= weekInsights.highRiskCount
+                        ? `${weekInsights.lowCount} low-risk days — you are on a solid streak this week`
+                        : "Mixed week — a good night's sleep can flip tomorrow's score significantly"}
                   </span>
                 </div>
               </>
@@ -671,14 +849,76 @@ export default function DashboardPage() {
                 Not enough weekly data yet — check back after a few more days.
               </p>
             )}
-            <Link
-              href="/insights"
-              className="inline-flex items-center gap-1 text-xs text-[var(--gold)] hover:opacity-75 transition-opacity mt-2"
-            >
-              See full patterns <ArrowUpRight className="w-3 h-3" />
-            </Link>
           </div>
         )}
+
+        {/* ── Mini Backbone chat ────────────────────────────────────────────── */}
+        <div className="border-t border-[var(--border)] pt-4">
+          <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-widest mb-2">Backbone</p>
+
+          {/* Message area — max 200px, scrollable */}
+          <div className="max-h-[200px] overflow-y-auto space-y-2 mb-3 pr-1">
+            {miniLoading && miniMessages.length === 0 && (
+              <div className="flex justify-start">
+                <div className="bg-[var(--glass-subtle)] border border-[var(--border)] px-3 py-2 rounded-xl text-xs text-[var(--text-muted)]">
+                  Backbone is thinking…
+                </div>
+              </div>
+            )}
+            {miniMessages.length === 0 && !miniLoading && (
+              <p className="text-xs text-[var(--text-muted)] py-1">Ask Backbone anything about today…</p>
+            )}
+            {miniMessages.slice(-4).map(msg => (
+              <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs leading-relaxed ${
+                  msg.role === "user"
+                    ? "bg-[var(--gold)] text-[#080808]"
+                    : "bg-[var(--glass-subtle)] border border-[var(--border)] text-[var(--text)]"
+                }`}>
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {miniLoading && miniMessages.length > 0 && (
+              <div className="flex justify-start">
+                <div className="bg-[var(--glass-subtle)] border border-[var(--border)] px-3 py-2 rounded-xl">
+                  <span className="flex gap-1">
+                    {[0, 1, 2].map(i => (
+                      <span key={i} className="w-1 h-1 bg-[var(--text-dim)] rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                    ))}
+                  </span>
+                </div>
+              </div>
+            )}
+            <div ref={miniBottomRef} />
+          </div>
+
+          {/* Input */}
+          <div className="flex gap-2 mb-2">
+            <input
+              type="text"
+              value={miniInput}
+              onChange={e => setMiniInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && sendMiniChat(miniInput)}
+              placeholder="Ask Backbone…"
+              className="flex-1 px-3 py-2 text-xs border border-[var(--glass-border)] rounded-lg bg-[var(--glass-subtle)] text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:ring-1 focus:ring-[var(--gold)]/40"
+            />
+            <button
+              onClick={() => sendMiniChat(miniInput)}
+              disabled={!miniInput.trim() || miniLoading}
+              className="px-3 py-2 bg-[var(--gold)] text-[#080808] rounded-lg disabled:opacity-40 transition-opacity hover:opacity-90"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <Link
+            href="/insights"
+            className="inline-flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--gold)] transition-colors"
+          >
+            Continue in Insights <ArrowUpRight className="w-3 h-3" />
+          </Link>
+        </div>
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════════
