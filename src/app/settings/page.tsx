@@ -232,15 +232,15 @@ function SettingsPageInner() {
     setWhoopBackfilling(true);
     setWhoopBackfillResult(null);
     try {
-      const res  = await fetch("/api/whoop/sync", {
+      const res  = await fetch("/api/whoop/backfill", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ user_id: userId, days: 90 }),
+        body:    JSON.stringify({ user_id: userId }),
       });
       const data = await res.json();
       if (data.success) {
-        setWhoopBackfillResult(`Synced ${data.days_synced} days of Whoop history.`);
-        toast(`Whoop backfill complete — ${data.days_synced} days synced`, "success");
+        setWhoopBackfillResult(`Done — synced ${data.days_upserted} days of all-time Whoop data.`);
+        toast(`Whoop backfill complete — ${data.days_upserted} days`, "success");
       } else {
         toast(data.error ?? "Backfill failed", "error");
       }
@@ -596,7 +596,7 @@ function SettingsPageInner() {
                   <div>
                     <p className="text-sm font-medium text-[var(--text)]">Backfill history</p>
                     <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                      Pulls the last 90 days of Whoop data — recovery, sleep, and strain — and recalculates your risk score for each day. Run this once to populate your full history.
+                      Fetches your complete Whoop history — every recovery, sleep, and strain record — and syncs it all into Spine. Run this once. Takes ~30 seconds.
                     </p>
                   </div>
                   <button
@@ -605,7 +605,7 @@ function SettingsPageInner() {
                     className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[#00D4A4]/10 hover:bg-[#00D4A4]/20 border border-[#00D4A4]/30 text-[#00D4A4] text-sm font-semibold disabled:opacity-40 transition-colors"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${whoopBackfilling ? "animate-spin" : ""}`} />
-                    {whoopBackfilling ? "Backfilling…" : "Backfill 90 days"}
+                    {whoopBackfilling ? "Backfilling all time…" : "Backfill all time"}
                   </button>
                 </div>
                 {whoopBackfilling && (
