@@ -21,8 +21,11 @@ export async function POST(request: Request) {
     const webhookCode: string = body.webhook_code;
     const itemId: string = body.item_id;
 
+    console.log(`[webhook] Received: type=${webhookType} code=${webhookCode} item=${itemId}`);
+
     // Only handle TRANSACTIONS webhooks
     if (webhookType !== 'TRANSACTIONS') {
+      console.log(`[webhook] Ignoring non-TRANSACTIONS webhook (${webhookType}/${webhookCode})`);
       return NextResponse.json({ received: true });
     }
 
