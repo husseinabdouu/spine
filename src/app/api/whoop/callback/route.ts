@@ -4,7 +4,7 @@ import { exchangeWhoopCode, getWhoopUserId } from "@/lib/wearables/whoop";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const appUrl      = process.env.NEXT_PUBLIC_APP_URL!;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://spine-one.vercel.app";
   const code        = searchParams.get("code");
   const state       = searchParams.get("state");
   const oauthError  = searchParams.get("error");

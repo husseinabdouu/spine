@@ -73,6 +73,7 @@ function SettingsPageInner() {
   const [backfillResult, setBackfillResult]         = useState<string | null>(null);
   const [updatingWebhook, setUpdatingWebhook]       = useState(false);
   const [webhookResult, setWebhookResult]           = useState<string | null>(null);
+  const [whoopError, setWhoopError]                 = useState<string | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -92,8 +93,10 @@ function SettingsPageInner() {
         whoop_db_error:      "Could not save Whoop connection.",
         whoop_invalid_state: "Invalid OAuth state. Please try again.",
       };
-      const msg = (base[error] ?? "Whoop connection error.") + (detail ? ` (${decodeURIComponent(detail)})` : "");
-      toast(msg, "error");
+      const decoded = detail ? decodeURIComponent(detail) : null;
+      const msg = base[error] ?? "Whoop connection error.";
+      toast(msg + (decoded ? ` ${decoded}` : ""), "error");
+      setWhoopError(decoded ?? msg);
       router.replace("/settings");
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -578,6 +581,12 @@ function SettingsPageInner() {
                 <Zap className="w-4 h-4" />
                 Connect Whoop
               </button>
+              {whoopError && (
+                <div className="p-3 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/30">
+                  <p className="text-xs text-[var(--danger)] font-medium">Connection failed</p>
+                  <p className="text-xs text-[var(--danger)]/80 mt-0.5 break-all">{whoopError}</p>
+                </div>
+              )}
               <p className="text-xs text-[var(--text-muted)]">
                 You&apos;ll be redirected to Whoop to authorise. Spine requests read-only access to recovery, sleep, and activity.
               </p>

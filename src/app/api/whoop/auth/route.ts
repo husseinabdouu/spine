@@ -4,7 +4,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get("user_id");
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL!;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://spine-one.vercel.app";
 
   if (!userId) {
     return NextResponse.redirect(`${appUrl}/settings?error=whoop_no_user`);
