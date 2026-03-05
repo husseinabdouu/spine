@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   ArrowLeftRight,
   Sparkles,
+  Activity,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -15,6 +16,7 @@ import {
 const NAV_LINKS = [
   { href: "/dashboard",    label: "Dashboard",    Icon: LayoutDashboard },
   { href: "/transactions", label: "Transactions", Icon: ArrowLeftRight  },
+  { href: "/health",       label: "Health",       Icon: Activity        },
   { href: "/insights",     label: "Insights",     Icon: Sparkles        },
   { href: "/settings",     label: "Settings",     Icon: Settings        },
 ] as const;
