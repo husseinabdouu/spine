@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTheme } from "next-themes";
 import { supabase } from "@/lib/supabase/client";
 import PlaidLink from "@/components/PlaidLink";
 import AppShell from "@/components/AppShell";
@@ -20,6 +21,9 @@ import {
   Smartphone,
   RefreshCw,
   Zap,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
@@ -58,6 +62,7 @@ function SettingsPageInner() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const { toast }    = useToast();
+  const { theme, setTheme } = useTheme();
   const [userEmail, setUserEmail]           = useState<string | null>(null);
   const [userId, setUserId]                 = useState<string | null>(null);
   const [memberSince, setMemberSince]       = useState<string | null>(null);
@@ -385,7 +390,7 @@ function SettingsPageInner() {
           ) : (
             <div className="space-y-3">
               {plaidItems.map(item => (
-                <div key={item.id} className="flex items-center justify-between bg-white/[0.03] border border-[var(--border)] rounded-lg px-4 py-3">
+                <div key={item.id} className="flex items-center justify-between bg-[var(--glass-subtle)] border border-[var(--border)] rounded-lg px-4 py-3">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-[var(--safe-dim)] flex items-center justify-center shrink-0">
                       <CreditCard className="w-4 h-4 text-[var(--safe)]" />
@@ -430,7 +435,7 @@ function SettingsPageInner() {
                   <button
                     onClick={updateWebhook}
                     disabled={updatingWebhook}
-                    className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] border border-[var(--border)] text-[var(--text-dim)] text-sm font-semibold disabled:opacity-40 transition-colors"
+                    className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] border border-[var(--border)] text-[var(--text-dim)] text-sm font-semibold disabled:opacity-40 transition-colors"
                   >
                     <Zap className={`w-3.5 h-3.5 ${updatingWebhook ? "animate-pulse" : ""}`} />
                     {updatingWebhook ? "Updating…" : "Update webhook"}
@@ -477,7 +482,7 @@ function SettingsPageInner() {
           </div>
 
           {/* Last sync status */}
-          <div className="flex items-start gap-3 p-4 rounded-lg bg-white/[0.03] border border-[var(--border)] mb-5">
+          <div className="flex items-start gap-3 p-4 rounded-lg bg-[var(--glass-subtle)] border border-[var(--border)] mb-5">
             {latestHealth ? (
               <>
                 <CheckCircle className="w-4 h-4 text-[var(--safe)] mt-0.5 shrink-0" />
@@ -516,7 +521,7 @@ function SettingsPageInner() {
             </ol>
 
             {/* Copyable URL */}
-            <div className="flex items-center gap-2 bg-black/40 border border-[var(--border)] rounded-lg px-4 py-3">
+            <div className="flex items-center gap-2 bg-[var(--code-bg)] border border-[var(--border)] rounded-lg px-4 py-3">
               <code className="text-xs text-[var(--gold)] flex-1 truncate font-mono">{SHORTCUT_URL}</code>
               <button
                 onClick={copyUrl}
@@ -533,7 +538,7 @@ function SettingsPageInner() {
               </li>
             </ol>
 
-            <div className="bg-black/40 border border-[var(--border)] rounded-lg px-4 py-3">
+            <div className="bg-[var(--code-bg)] border border-[var(--border)] rounded-lg px-4 py-3">
               <pre className="text-xs text-[var(--text-dim)] font-mono leading-relaxed whitespace-pre-wrap">{`{
   "user_id": "${userId}",
   "date": "YYYY-MM-DD",
@@ -574,7 +579,7 @@ function SettingsPageInner() {
           <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold mb-4 ${
             whoopConn
               ? "bg-[var(--safe-dim)] text-[var(--safe)]"
-              : "bg-white/[0.06] text-[var(--text-muted)]"
+              : "bg-[var(--glass-mid)] text-[var(--text-muted)]"
           }`}>
             <span className={`w-1.5 h-1.5 rounded-full ${whoopConn ? "bg-[var(--safe)]" : "bg-[var(--text-muted)]"}`} />
             {whoopConn ? "Connected" : "Not connected"}
@@ -582,7 +587,7 @@ function SettingsPageInner() {
 
           {whoopConn ? (
             <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 rounded-lg bg-white/[0.03] border border-[var(--border)]">
+              <div className="flex items-start gap-3 p-4 rounded-lg bg-[var(--glass-subtle)] border border-[var(--border)]">
                 <CheckCircle className="w-4 h-4 text-[var(--safe)] mt-0.5 shrink-0" />
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-[var(--text)]">Whoop connected</div>
@@ -603,7 +608,7 @@ function SettingsPageInner() {
                 <button
                   onClick={syncWhoop}
                   disabled={whoopSyncing}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-sm text-[var(--text-dim)] disabled:opacity-40 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] text-sm text-[var(--text-dim)] disabled:opacity-40 transition-colors"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${whoopSyncing ? "animate-spin" : ""}`} />
                   {whoopSyncing ? "Syncing…" : "Sync now"}
@@ -675,6 +680,40 @@ function SettingsPageInner() {
               </p>
             </div>
           )}
+        </section>
+
+        {/* ── Appearance ───────────────────────────────────────────────────── */}
+        <section className={`${CARD} p-6`}>
+          <div className="flex items-center gap-3 mb-5">
+            <Monitor className="w-4 h-4 text-[var(--text-muted)]" />
+            <h2 className="text-sm font-semibold text-[var(--text-dim)] uppercase tracking-widest">Appearance</h2>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-[var(--text-dim)] mb-3">Choose your preferred color theme.</p>
+            <div className="flex gap-2">
+              {([
+                { value: "light",  label: "Light",  Icon: Sun     },
+                { value: "dark",   label: "Dark",   Icon: Moon    },
+                { value: "system", label: "System", Icon: Monitor },
+              ] as const).map(({ value, label, Icon }) => {
+                const active = theme === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setTheme(value)}
+                    className={`flex-1 flex flex-col items-center gap-2 py-3.5 rounded-xl border text-sm font-medium transition-all ${
+                      active
+                        ? "border-[var(--gold)] text-[var(--gold)] bg-[var(--glass-subtle)]"
+                        : "border-[var(--border)] text-[var(--text-dim)] hover:border-[var(--text-muted)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </section>
 
         {/* ── Privacy & Legal ──────────────────────────────────────────────── */}

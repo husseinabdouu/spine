@@ -75,7 +75,7 @@ function RiskGauge({ score }: { score: number }) {
       <path
         d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
         fill="none"
-        stroke="rgba(255,255,255,0.08)"
+        stroke="var(--svg-track-alt)"
         strokeWidth="10"
         strokeLinecap="round"
       />
@@ -89,7 +89,7 @@ function RiskGauge({ score }: { score: number }) {
         strokeDashoffset={arcLen - filled}
         style={{ transition: "stroke-dashoffset 1s ease-out", filter: `drop-shadow(0 0 6px ${color}80)` }}
       />
-      <text x={cx} y={cy - 4} textAnchor="middle" fill="white" fontSize="26" fontWeight="bold" fontFamily="var(--font-sans)">
+      <text x={cx} y={cy - 4} textAnchor="middle" fill="var(--text-strong)" fontSize="26" fontWeight="bold" fontFamily="var(--font-sans)">
         {score}
       </text>
       <text x={cx} y={cy + 12} textAnchor="middle" fill="#71717a" fontSize="9" fontFamily="var(--font-sans)">
@@ -205,7 +205,7 @@ export default function InsightsPage() {
               <button
                 onClick={calculateRisk}
                 disabled={calculating}
-                className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-dim)] hover:text-white disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-dim)] hover:text-[var(--text-strong)] disabled:opacity-50 transition-colors"
               >
                 <RefreshCw className={`w-3 h-3 ${calculating ? "animate-spin" : ""}`} />
                 {calculating ? "Calculating…" : "Recalculate"}
@@ -257,7 +257,7 @@ export default function InsightsPage() {
                   <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm">
                     <Moon className="w-4 h-4" /> Sleep
                   </div>
-                  <span className="text-white font-medium text-sm">
+                  <span className="text-[var(--text-strong)] font-medium text-sm">
                     {health.sleep_hours != null ? `${health.sleep_hours.toFixed(1)}h` : "—"}
                   </span>
                 </div>
@@ -265,7 +265,7 @@ export default function InsightsPage() {
                   <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm">
                     <Heart className="w-4 h-4" /> HRV
                   </div>
-                  <span className="text-white font-medium text-sm">
+                  <span className="text-[var(--text-strong)] font-medium text-sm">
                     {health.hrv_avg != null ? `${health.hrv_avg}ms` : "—"}
                   </span>
                 </div>
@@ -273,7 +273,7 @@ export default function InsightsPage() {
                   <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm">
                     <Activity className="w-4 h-4" /> Activity
                   </div>
-                  <span className="text-white font-medium text-sm">
+                  <span className="text-[var(--text-strong)] font-medium text-sm">
                     {health.active_energy != null ? health.active_energy.toLocaleString() : "—"}
                   </span>
                 </div>
@@ -291,7 +291,7 @@ export default function InsightsPage() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-[var(--text-muted)]">This week</span>
-                  <span className="text-white font-medium">${parseFloat(insight.spending_summary.last_7_days).toFixed(0)}</span>
+                  <span className="text-[var(--text-strong)] font-medium">${parseFloat(insight.spending_summary.last_7_days).toFixed(0)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-[var(--text-muted)]">Last week</span>
@@ -340,7 +340,7 @@ export default function InsightsPage() {
         <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-2xl backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] flex flex-col min-h-[600px]">
           {/* Header */}
           <div className="px-5 py-4 border-b border-[var(--border)]">
-            <h2 className="font-semibold text-white">Backbone</h2>
+            <h2 className="font-semibold text-[var(--text-strong)]">Backbone</h2>
             <p className="text-xs text-[var(--text-dim)] mt-0.5">Your behavioral finance AI · Powered by Claude</p>
           </div>
 
@@ -355,7 +355,7 @@ export default function InsightsPage() {
                   <button
                     key={q}
                     onClick={() => sendMessage(q)}
-                    className="block w-full text-left px-4 py-2.5 rounded-xl border border-[var(--glass-border)] bg-white/[0.03] text-sm text-[var(--text-dim)] hover:text-white hover:border-[var(--gold)]/40 transition-all"
+                    className="block w-full text-left px-4 py-2.5 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-subtle)] text-sm text-[var(--text-dim)] hover:text-[var(--text-strong)] hover:border-[var(--gold)]/40 transition-all"
                   >
                     {q}
                   </button>
@@ -368,8 +368,8 @@ export default function InsightsPage() {
                 <div
                   className={`max-w-[88%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                     msg.role === "user"
-                      ? "bg-white/90 text-[#080808] rounded-br-sm"
-                      : "bg-white/[0.05] border border-[var(--glass-border)] text-[var(--text)] rounded-bl-sm"
+                      ? "bg-[var(--gold)] text-[#080808] rounded-br-sm"
+                      : "bg-[var(--glass-subtle)] border border-[var(--glass-border)] text-[var(--text)] rounded-bl-sm"
                   }`}
                 >
                   {msg.role === "backbone" ? (
@@ -385,7 +385,7 @@ export default function InsightsPage() {
 
             {isLoading && (
               <div className="flex justify-start">
-                <div className="bg-white/[0.05] border border-[var(--glass-border)] px-4 py-3 rounded-2xl rounded-bl-sm">
+                <div className="bg-[var(--glass-subtle)] border border-[var(--glass-border)] px-4 py-3 rounded-2xl rounded-bl-sm">
                   <span className="flex gap-1">
                     {[0, 1, 2].map(i => (
                       <span key={i} className="w-1.5 h-1.5 bg-[var(--text-dim)] rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
@@ -407,7 +407,7 @@ export default function InsightsPage() {
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && sendMessage(input)}
                 placeholder="Ask Backbone…"
-                className="flex-1 px-4 py-2.5 border border-[var(--glass-border)] rounded-xl bg-white/[0.04] text-sm text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:ring-2 focus:ring-[var(--gold)]/40"
+                className="flex-1 px-4 py-2.5 border border-[var(--glass-border)] rounded-xl bg-[var(--glass-subtle)] text-sm text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:ring-2 focus:ring-[var(--gold)]/40"
               />
               <button
                 onClick={() => sendMessage(input)}

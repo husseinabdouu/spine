@@ -259,7 +259,7 @@ export default function TransactionsPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-5 py-2 rounded-lg text-sm font-medium capitalize transition-all ${activeTab === tab ? "bg-[var(--gold)] text-[#080808]" : "text-[var(--text-dim)] hover:text-white"}`}
+            className={`px-5 py-2 rounded-lg text-sm font-medium capitalize transition-all ${activeTab === tab ? "bg-[var(--gold)] text-[#080808]" : "text-[var(--text-dim)] hover:text-[var(--text-strong)]"}`}
           >
             {tab} ({tab === "spending" ? spending.length : income.length})
           </button>
@@ -344,7 +344,7 @@ export default function TransactionsPage() {
                 const cat = resolveCategory(t.category);
                 const color = CATEGORY_COLORS[cat] || "#71717a";
                 return (
-                  <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
+                  <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-[var(--glass-hover-subtle)] transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
                         <CreditCard className="w-4 h-4" style={{ color }} />
@@ -363,7 +363,7 @@ export default function TransactionsPage() {
                         style={{ backgroundColor: `${color}15`, borderColor: `${color}50`, color }}
                       >
                         {USER_CATEGORIES.map(c => (
-                          <option key={c} value={c} style={{ backgroundColor: "#111214", color: "#f0f0f0" }}>{c}</option>
+                          <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>{c}</option>
                         ))}
                       </select>
                       <div className="text-sm font-semibold text-[var(--text-dim)] w-20 text-right tabular-nums">
@@ -384,7 +384,7 @@ export default function TransactionsPage() {
           ) : (
             <div className="divide-y divide-[var(--border)]">
               {filteredIncome.map(t => (
-                <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors">
+                <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-[var(--glass-hover-subtle)] transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-9 h-9 rounded-lg bg-[var(--safe-dim)] flex items-center justify-center shrink-0">
                       <ArrowDownLeft className="w-4 h-4 text-[var(--safe)]" />
@@ -409,13 +409,13 @@ export default function TransactionsPage() {
       {/* Add Transaction Modal */}
       {showAddModal && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-[var(--modal-overlay)] backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={e => e.target === e.currentTarget && setShowAddModal(false)}
         >
-          <div className="bg-[#0c0d0f] border border-[var(--glass-border)] rounded-2xl p-6 w-full max-w-md shadow-2xl">
+          <div className="bg-[var(--modal-bg)] border border-[var(--glass-border)] rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-semibold text-white">Add Transaction</h2>
-              <button onClick={() => setShowAddModal(false)} className="text-[var(--text-dim)] hover:text-white transition-colors">
+              <h2 className="text-lg font-semibold text-[var(--text-strong)]">Add Transaction</h2>
+              <button onClick={() => setShowAddModal(false)} className="text-[var(--text-dim)] hover:text-[var(--text-strong)] transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -424,13 +424,13 @@ export default function TransactionsPage() {
             <div className="flex gap-2 mb-5 p-1 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
               <button
                 onClick={() => setAddForm(f => ({ ...f, type: "expense", category: "Food & Drink" }))}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "expense" ? "bg-[var(--danger)] text-white" : "text-[var(--text-dim)] hover:text-white"}`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "expense" ? "bg-[var(--danger)] text-white" : "text-[var(--text-dim)] hover:text-[var(--text-strong)]"}`}
               >
                 Expense
               </button>
               <button
                 onClick={() => setAddForm(f => ({ ...f, type: "income", category: "Other Income" }))}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "income" ? "bg-[var(--safe)] text-[#080808] font-semibold" : "text-[var(--text-dim)] hover:text-white"}`}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "income" ? "bg-[var(--safe)] text-[#080808] font-semibold" : "text-[var(--text-dim)] hover:text-[var(--text-strong)]"}`}
               >
                 Income
               </button>
@@ -462,7 +462,7 @@ export default function TransactionsPage() {
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAddModal(false)} className="flex-1 py-2.5 border border-[var(--glass-border)] rounded-xl text-[var(--text-dim)] hover:text-white text-sm transition-colors">
+              <button onClick={() => setShowAddModal(false)} className="flex-1 py-2.5 border border-[var(--glass-border)] rounded-xl text-[var(--text-dim)] hover:text-[var(--text-strong)] text-sm transition-colors">
                 Cancel
               </button>
               <button

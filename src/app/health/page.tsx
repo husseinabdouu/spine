@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import AppShell from "@/components/AppShell";
@@ -55,15 +56,18 @@ type Tab   = "overview" | "sleep" | "recovery" | "strain";
 
 const CARD = "rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]";
 
-const BASE_CHART = {
-  responsive:          true,
-  maintainAspectRatio: false,
-  plugins: { legend: { display: false }, tooltip: { mode: "index" as const, intersect: false } },
-  scales: {
-    x: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "rgba(255,255,255,0.3)", maxTicksLimit: 8, font: { size: 10 } } },
-    y: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "rgba(255,255,255,0.3)", font: { size: 10 } } },
-  },
-};
+// Chart colors are computed inside the component based on theme
+function makeBaseChart(grid: string, tick: string) {
+  return {
+    responsive:          true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: { mode: "index" as const, intersect: false } },
+    scales: {
+      x: { grid: { color: grid }, ticks: { color: tick, maxTicksLimit: 8, font: { size: 10 } } },
+      y: { grid: { color: grid }, ticks: { color: tick, font: { size: 10 } } },
+    },
+  };
+}
 
 function rColor(v: number | null) {
   if (v === null) return "var(--text-muted)";
@@ -138,6 +142,12 @@ function Stat({ label, value, sub, color = "var(--text)" }: {
 
 export default function HealthPage() {
   const router = useRouter();
+  const { resolvedTheme } = useTheme();
+  const isDark    = resolvedTheme !== "light";
+  const chartGrid = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)";
+  const chartTick = isDark ? "rgba(255,255,255,0.3)"  : "rgba(0,0,0,0.35)";
+  const chartLbl  = isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.30)";
+  const BASE_CHART = makeBaseChart(chartGrid, chartTick);
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId,    setUserId]    = useState<string | null>(null);
@@ -268,8 +278,8 @@ export default function HealthPage() {
     ...BASE_CHART,
     scales: {
       ...BASE_CHART.scales,
-      y:  { ...BASE_CHART.scales.y, position: "left"  as const, title: { display: true, text: leftLabel,  color: "rgba(255,255,255,0.25)", font: { size: 10 } } },
-      y1: { ...BASE_CHART.scales.y, position: "right" as const, grid: { drawOnChartArea: false }, title: { display: true, text: rightLabel, color: "rgba(255,255,255,0.25)", font: { size: 10 } } },
+      y:  { ...BASE_CHART.scales.y, position: "left"  as const, title: { display: true, text: leftLabel,  color: chartLbl, font: { size: 10 } } },
+      y1: { ...BASE_CHART.scales.y, position: "right" as const, grid: { drawOnChartArea: false }, title: { display: true, text: rightLabel, color: chartLbl, font: { size: 10 } } },
     },
   });
 
@@ -294,7 +304,7 @@ export default function HealthPage() {
         {/* ── Header ── */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Health</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-[var(--text-strong)]">Health</h1>
             <p className="text-sm text-[var(--text-muted)] mt-0.5">
               {health.length > 0
                 ? `${health.length} days · last synced ${format(parseLocalDate(health.at(-1)!.date), "MMM d")}`
@@ -302,12 +312,12 @@ export default function HealthPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex gap-0.5 bg-white/[0.04] rounded-lg p-1 border border-[var(--border)]">
+            <div className="flex gap-0.5 bg-[var(--glass-subtle)] rounded-lg p-1 border border-[var(--border)]">
               {RANGES.map(r => (
                 <button
                   key={r}
                   onClick={() => setRange(r)}
-                  className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${range === r ? "bg-[var(--gold)] text-black" : "text-[var(--text-dim)] hover:text-white"}`}
+                  className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${range === r ? "bg-[var(--gold)] text-black" : "text-[var(--text-dim)] hover:text-[var(--text-strong)]"}`}
                 >
                   {r === "all" ? "All" : r === "1" ? "Today" : `${r}d`}
                 </button>
@@ -316,7 +326,7 @@ export default function HealthPage() {
             <button
               onClick={refreshToday}
               disabled={syncing}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--text-dim)] hover:text-white hover:border-white/20 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--text-dim)] hover:text-[var(--text-strong)] hover:border-[var(--border)] transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
               {syncing ? "Syncing…" : "Refresh"}
@@ -372,7 +382,7 @@ export default function HealthPage() {
                     {/* Big score ring */}
                     <div className="relative w-20 h-20 shrink-0">
                       <svg className="w-full h-full -rotate-90" viewBox="0 0 80 80">
-                        <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                        <circle cx="40" cy="40" r="32" fill="none" stroke="var(--svg-track)" strokeWidth="8" />
                         <circle
                           cx="40" cy="40" r="32" fill="none"
                           stroke={rColor(todayRow.whoop_recovery_score)}
@@ -413,7 +423,7 @@ export default function HealthPage() {
                       <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
                         <span>HRV</span><span>{Math.round(todayRow.hrv_avg)} ms</span>
                       </div>
-                      <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                      <div className="h-1.5 bg-[var(--glass-mid)] rounded-full overflow-hidden">
                         <div className="h-full rounded-full bg-[#818cf8]" style={{ width: `${Math.min(100, (todayRow.hrv_avg / 120) * 100)}%` }} />
                       </div>
                     </div>
@@ -480,7 +490,7 @@ export default function HealthPage() {
                       <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Strain</p>
                       <p className="text-3xl font-bold text-[#fb923c]">{todayRow.whoop_strain != null ? todayRow.whoop_strain.toFixed(1) : "—"}</p>
                       {todayRow.whoop_strain != null && (
-                        <div className="mt-2 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                        <div className="mt-2 h-1.5 bg-[var(--glass-mid)] rounded-full overflow-hidden">
                           <div className="h-full rounded-full bg-[#fb923c]" style={{ width: `${(todayRow.whoop_strain / 21) * 100}%` }} />
                         </div>
                       )}
@@ -504,7 +514,7 @@ export default function HealthPage() {
                     <button
                       key={key}
                       onClick={() => setTab(key)}
-                      className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${tab === key ? "border-[var(--gold)] text-white" : "border-transparent text-[var(--text-muted)] hover:text-white"}`}
+                      className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${tab === key ? "border-[var(--gold)] text-[var(--text-strong)]" : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-strong)]"}`}
                     >
                       {label}
                     </button>
@@ -587,7 +597,7 @@ export default function HealthPage() {
               <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
                 <h3 className="text-sm font-semibold text-[var(--text)]">Daily Log</h3>
                 {selectedDay && (
-                  <button onClick={() => setDayIdx(null)} className="text-xs text-[var(--text-muted)] hover:text-white transition-colors">
+                  <button onClick={() => setDayIdx(null)} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)] transition-colors">
                     ← Back to list
                   </button>
                 )}
@@ -597,13 +607,13 @@ export default function HealthPage() {
               {selectedDay ? (
                 <div className="p-5 space-y-5">
                   <div className="flex items-center justify-between">
-                    <button onClick={() => setDayIdx(d => d! > 0 ? d! - 1 : d)} disabled={dayIdx === 0} className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--text-dim)] hover:text-white disabled:opacity-30 transition-colors">
+                    <button onClick={() => setDayIdx(d => d! > 0 ? d! - 1 : d)} disabled={dayIdx === 0} className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--text-dim)] hover:text-[var(--text-strong)] disabled:opacity-30 transition-colors">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <h4 className="text-base font-semibold text-white">
+                    <h4 className="text-base font-semibold text-[var(--text-strong)]">
                       {format(parseLocalDate(selectedDay.date), "EEEE, MMMM d yyyy")}
                     </h4>
-                    <button onClick={() => setDayIdx(d => d! < health.length - 1 ? d! + 1 : d)} disabled={dayIdx === health.length - 1} className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--text-dim)] hover:text-white disabled:opacity-30 transition-colors">
+                    <button onClick={() => setDayIdx(d => d! < health.length - 1 ? d! + 1 : d)} disabled={dayIdx === health.length - 1} className="p-1.5 rounded-lg border border-[var(--border)] text-[var(--text-dim)] hover:text-[var(--text-strong)] disabled:opacity-30 transition-colors">
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
@@ -665,7 +675,7 @@ export default function HealthPage() {
                           <tr
                             key={row.date}
                             onClick={() => setDayIdx(realIdx)}
-                            className="text-[var(--text-dim)] hover:bg-white/[0.03] cursor-pointer transition-colors"
+                            className="text-[var(--text-dim)] hover:bg-[var(--glass-subtle)] cursor-pointer transition-colors"
                           >
                             <td className="px-5 py-2.5 font-medium text-[var(--text)] whitespace-nowrap">
                               {format(parseLocalDate(row.date), "MMM d, yyyy")}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
@@ -69,6 +70,10 @@ const CARD = "bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-x
 
 export default function DashboardPage() {
   const { toast } = useToast();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme !== "light";
+  const chartGrid  = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)";
+  const chartTick  = isDark ? "#71717a" : "#64748b";
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -302,7 +307,7 @@ export default function DashboardPage() {
             <button
               onClick={calculateBehavioralRisk}
               disabled={calculating}
-              className="text-xs px-2.5 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-[var(--text-dim)] disabled:opacity-40 transition-colors"
+              className="text-xs px-2.5 py-1 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] text-[var(--text-dim)] disabled:opacity-40 transition-colors"
             >
               {calculating ? "…" : "Recalculate"}
             </button>
@@ -342,7 +347,7 @@ export default function DashboardPage() {
             <span className="text-xs font-semibold uppercase tracking-widest text-[var(--text-muted)]">This Week</span>
             <ArrowUpRight className="w-4 h-4 text-[var(--text-muted)]" />
           </div>
-          <div className="text-4xl font-bold text-white leading-none mb-1">
+          <div className="text-4xl font-bold text-[var(--text-strong)] leading-none mb-1">
             ${weeklySpend.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <p className="text-xs text-[var(--text-muted)] mb-3">{weeklyExpenses.length} expenses in the last 7 days</p>
@@ -369,7 +374,7 @@ export default function DashboardPage() {
                     <Moon className="w-3.5 h-3.5" />
                     <span className="text-xs">Sleep</span>
                   </div>
-                  <span className="text-sm font-semibold text-white">{healthData.sleep_hours.toFixed(1)}h</span>
+                  <span className="text-sm font-semibold text-[var(--text-strong)]">{healthData.sleep_hours.toFixed(1)}h</span>
                 </div>
               )}
               {healthData.hrv_avg != null && (
@@ -378,7 +383,7 @@ export default function DashboardPage() {
                     <Heart className="w-3.5 h-3.5" />
                     <span className="text-xs">HRV</span>
                   </div>
-                  <span className="text-sm font-semibold text-white">{healthData.hrv_avg}ms</span>
+                  <span className="text-sm font-semibold text-[var(--text-strong)]">{healthData.hrv_avg}ms</span>
                 </div>
               )}
               {healthData.active_energy != null && (
@@ -387,7 +392,7 @@ export default function DashboardPage() {
                     <Activity className="w-3.5 h-3.5" />
                     <span className="text-xs">Steps</span>
                   </div>
-                  <span className="text-sm font-semibold text-white">{healthData.active_energy.toLocaleString()}</span>
+                  <span className="text-sm font-semibold text-[var(--text-strong)]">{healthData.active_energy.toLocaleString()}</span>
                 </div>
               )}
             </div>
@@ -418,7 +423,7 @@ export default function DashboardPage() {
                   plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `$${(ctx.parsed.y ?? 0).toFixed(2)}` } } },
                   scales: {
                     x: { grid: { display: false }, ticks: { color: "#71717a", font: { size: 11 } }, border: { display: false } },
-                    y: { grid: { color: "rgba(255,255,255,0.04)" }, ticks: { color: "#71717a", font: { size: 11 }, callback: v => `$${v}` }, border: { display: false } },
+                    y: { grid: { color: chartGrid }, ticks: { color: chartTick, font: { size: 11 }, callback: v => `$${v}` }, border: { display: false } },
                   },
                 }}
               />
@@ -476,7 +481,7 @@ export default function DashboardPage() {
               <button
                 onClick={syncTransactions}
                 disabled={syncing}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-[var(--text-dim)] disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] text-[var(--text-dim)] disabled:opacity-40 transition-colors"
               >
                 <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
                 {syncing ? "Syncing…" : "Sync"}
