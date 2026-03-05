@@ -63,12 +63,14 @@ function SettingsPageInner() {
   const [memberSince, setMemberSince]       = useState<string | null>(null);
   const [plaidItems, setPlaidItems]         = useState<PlaidItem[]>([]);
   const [latestHealth, setLatestHealth]     = useState<HealthData | null>(null);
-  const [whoopConn, setWhoopConn]           = useState<WhoopConnection | null>(null);
-  const [whoopSyncing, setWhoopSyncing]     = useState(false);
+  const [whoopConn, setWhoopConn]                   = useState<WhoopConnection | null>(null);
+  const [whoopSyncing, setWhoopSyncing]             = useState(false);
   const [disconnectingWhoop, setDisconnectingWhoop] = useState(false);
-  const [loading, setLoading]               = useState(true);
-  const [disconnecting, setDisconnecting]   = useState<string | null>(null);
-  const [copied, setCopied]                 = useState(false);
+  const [loading, setLoading]                       = useState(true);
+  const [disconnecting, setDisconnecting]           = useState<string | null>(null);
+  const [copied, setCopied]                         = useState(false);
+  const [backfilling, setBackfilling]               = useState(false);
+  const [backfillResult, setBackfillResult]         = useState<string | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -160,6 +162,32 @@ function SettingsPageInner() {
   function handlePlaidSuccess() {
     toast("Bank connected! Fetching transaction history…", "success");
     loadPlaidItems();
+  }
+
+  async function runBackfill() {
+    if (!userId) return;
+    setBackfilling(true);
+    setBackfillResult(null);
+    try {
+      const res  = await fetch("/api/plaid/backfill", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ user_id: userId, start_date: "2024-09-05" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const n = data.total_transactions_processed ?? 0;
+        setBackfillResult(`Done — processed ${n.toLocaleString()} transactions from Plaid.`);
+        toast("Backfill complete!", "success");
+      } else {
+        setBackfillResult(`Error: ${data.error}`);
+        toast(data.error ?? "Backfill failed", "error");
+      }
+    } catch {
+      setBackfillResult("Network error — check Vercel logs.");
+      toast("Backfill failed", "error");
+    }
+    setBackfilling(false);
   }
 
   async function syncWhoop() {
@@ -295,6 +323,34 @@ function SettingsPageInner() {
               ))}
               <div className="pt-2">
                 <PlaidLink onSuccess={handlePlaidSuccess} />
+              </div>
+
+              {/* Backfill */}
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--text)]">Full history backfill</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                      Forces Plaid to re-fetch everything from Sept 5, 2024 → today using both sync and get pipelines. Safe to run multiple times — no duplicates.
+                    </p>
+                    {backfillResult && (
+                      <p className="text-xs text-[var(--safe)] mt-1.5">{backfillResult}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={runBackfill}
+                    disabled={backfilling}
+                    className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] text-sm font-semibold disabled:opacity-40 transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${backfilling ? "animate-spin" : ""}`} />
+                    {backfilling ? "Running…" : "Run backfill"}
+                  </button>
+                </div>
+                {backfilling && (
+                  <p className="text-xs text-[var(--text-muted)] mt-2">
+                    This takes 15–30 seconds — Plaid needs time to refresh. Don&apos;t close the page.
+                  </p>
+                )}
               </div>
             </div>
           )}
