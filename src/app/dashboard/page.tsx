@@ -307,6 +307,24 @@ export default function DashboardPage() {
     return days;
   }, [transactions, insightByDate]);
 
+  // Weekly / monthly spending totals + top category
+  const spendingStats = useMemo(() => {
+    const weekCutoff  = format(subDays(new Date(), 7), "yyyy-MM-dd");
+    const monthCutoff = format(startOfMonth(new Date()), "yyyy-MM-dd");
+    const weekTxs  = transactions.filter(t => t.amount_cents > 0 && String(t.posted_at).slice(0, 10) >= weekCutoff);
+    const monthTxs = transactions.filter(t => t.amount_cents > 0 && String(t.posted_at).slice(0, 10) >= monthCutoff);
+    const weekTotal  = weekTxs.reduce((s, t) => s + t.amount_cents / 100, 0);
+    const monthTotal = monthTxs.reduce((s, t) => s + t.amount_cents / 100, 0);
+    const byCat: Record<string, number> = {};
+    for (const t of weekTxs) {
+      const cat = t.category || "Other";
+      byCat[cat] = (byCat[cat] ?? 0) + t.amount_cents / 100;
+    }
+    const sorted = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+    const topCat = sorted[0] ? { name: sorted[0][0], amount: sorted[0][1] } : null;
+    return { weekTotal, monthTotal, topCat };
+  }, [transactions]);
+
   // Baseline (median daily spend on LOW risk days)
   const baseline = useMemo(
     () => computeBaseline(transactions, insightsHistory),
@@ -372,25 +390,49 @@ export default function DashboardPage() {
     };
   }, [healthHistory]);
 
-  // Insight bullets for Zone 1
+  // Insight bullets for Zone 1 — always generated from real metric values
   const insightBullets = useMemo(() => {
-    if (todayInsight?.insights?.length) return todayInsight.insights.slice(0, 3);
     const b: string[] = [];
+
+    // Sleep
     if (todayHealth?.sleep_hours != null) {
       const h = todayHealth.sleep_hours;
-      b.push(h >= 7 ? `Slept ${h.toFixed(1)}h ✓` : `Slept ${h.toFixed(1)}h (target: 7+)`);
+      b.push(h >= 7
+        ? `Slept ${h.toFixed(1)}h — above your 7h target ✓`
+        : `Slept ${h.toFixed(1)}h — below your 7h target ✗`);
     }
+
+    // HRV
     if (todayHealth?.hrv_avg != null) {
       const hrv = todayHealth.hrv_avg;
-      b.push(hrv >= 55 ? `HRV ${hrv}ms ✓` : hrv >= 40 ? `HRV ${hrv}ms (moderate)` : `HRV ${hrv}ms (stressed)`);
+      if (hrv >= 70)       b.push(`HRV ${hrv}ms — well recovered ✓`);
+      else if (hrv >= 50)  b.push(`HRV ${hrv}ms — normal range ✓`);
+      else if (hrv >= 35)  b.push(`HRV ${hrv}ms — elevated stress ✗`);
+      else                 b.push(`HRV ${hrv}ms — high stress ✗`);
     }
-    if (todayInsight?.spending_summary?.change_percent) {
+
+    // Strain (fills slot if sleep/HRV didn't already reach 3)
+    if (b.length < 3 && todayHealth?.whoop_strain != null) {
+      const s = todayHealth.whoop_strain;
+      if (s >= 18)       b.push(`Strain ${s.toFixed(1)} — heavy load ✗`);
+      else if (s >= 14)  b.push(`Strain ${s.toFixed(1)} — strenuous activity ✓`);
+      else if (s >= 10)  b.push(`Strain ${s.toFixed(1)} — moderate activity ✓`);
+      else               b.push(`Strain ${s.toFixed(1)} — light day ✓`);
+    }
+
+    // Spending change vs last week (from behavioral_insights spending_summary)
+    if (b.length < 3 && todayInsight?.spending_summary?.change_percent) {
       const pct = parseFloat(todayInsight.spending_summary.change_percent);
-      if (!isNaN(pct) && Math.abs(pct) > 5)
-        b.push(`Spending ${pct > 0 ? "up" : "down"} ${Math.abs(Math.round(pct))}% this week`);
+      if (!isNaN(pct)) {
+        if (Math.abs(pct) < 5)
+          b.push("Spending on track vs last week ✓");
+        else
+          b.push(`Spending ${pct > 0 ? "up" : "down"} ${Math.abs(Math.round(pct))}% vs last week${pct > 0 ? " ✗" : " ✓"}`);
+      }
     }
+
     return b.slice(0, 3);
-  }, [todayInsight, todayHealth]);
+  }, [todayHealth, todayInsight]);
 
   // Forward-looking actionable advice for the Today tab (distinct from hero bullets)
   const todayAdvice = useMemo(() => {
@@ -664,6 +706,32 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {/* Spending stat pills */}
+            <div className="flex gap-2 flex-wrap mb-5">
+              {[
+                {
+                  label: "This week",
+                  value: spendingStats.weekTotal > 0 ? `$${spendingStats.weekTotal.toFixed(0)}` : "—",
+                },
+                {
+                  label: "This month",
+                  value: spendingStats.monthTotal > 0 ? `$${spendingStats.monthTotal.toFixed(0)}` : "—",
+                },
+                ...(spendingStats.topCat ? [{
+                  label: "Top category",
+                  value: `${spendingStats.topCat.name} $${spendingStats.topCat.amount.toFixed(0)}`,
+                }] : []),
+              ].map(p => (
+                <div
+                  key={p.label}
+                  className="px-3 py-2 rounded-xl bg-[var(--glass-subtle)] border border-[var(--border)] flex flex-col gap-0.5 min-w-0"
+                >
+                  <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest whitespace-nowrap">{p.label}</span>
+                  <span className="text-sm font-bold text-[var(--text)] truncate">{p.value}</span>
+                </div>
+              ))}
+            </div>
+
             {/* Weekly spend chart with risk colors */}
             <div className="mb-5">
               <div className="text-xs font-medium text-[var(--text-muted)] mb-2">
@@ -781,16 +849,16 @@ export default function DashboardPage() {
           {/* Metric pills */}
           <div className="flex gap-2 flex-wrap mb-5">
             {[
-              { label: "Sleep",  value: todayHealth?.sleep_hours  != null ? `${todayHealth.sleep_hours.toFixed(1)}h`       : null },
-              { label: "HRV",    value: todayHealth?.hrv_avg       != null ? `${todayHealth.hrv_avg}ms`                     : null },
-              { label: "Strain", value: todayHealth?.whoop_strain  != null ? `${todayHealth.whoop_strain.toFixed(1)}`       : null },
+              { label: "Sleep",  value: todayHealth?.sleep_hours  != null ? `${todayHealth.sleep_hours.toFixed(1)}h`  : null },
+              { label: "HRV",    value: todayHealth?.hrv_avg       != null ? `${todayHealth.hrv_avg}ms`               : null },
+              { label: "Strain", value: todayHealth?.whoop_strain  != null ? `${todayHealth.whoop_strain.toFixed(1)}` : null },
             ].filter(p => p.value !== null).map(p => (
               <div
                 key={p.label}
-                className="px-3 py-1.5 rounded-full bg-[var(--glass-subtle)] border border-[var(--border)] text-xs"
+                className="px-3 py-2.5 rounded-xl bg-[var(--glass-subtle)] border border-[var(--border)] flex flex-col gap-0.5"
               >
-                <span className="text-[var(--text-muted)]">{p.label} </span>
-                <span className="font-semibold text-[var(--text)]">{p.value}</span>
+                <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">{p.label}</span>
+                <span className="text-base font-bold text-[var(--text)]">{p.value}</span>
               </div>
             ))}
             {!todayHealth && (
