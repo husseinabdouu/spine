@@ -24,6 +24,32 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
 
+    // Whoop always wins — if this date already has Whoop data, refuse the write.
+    // The iOS Shortcut sends Apple Health data which is less accurate than Whoop.
+    // This prevents the shortcut from accidentally overwriting Whoop metrics.
+    const { data: existing } = await supabase
+      .from('health_data')
+      .select('source_device, whoop_recovery_score, whoop_strain, whoop_sleep_score')
+      .eq('user_id', user_id)
+      .eq('date', date)
+      .single();
+
+    if (
+      existing &&
+      (existing.source_device === 'whoop' ||
+        existing.whoop_recovery_score != null ||
+        existing.whoop_strain != null ||
+        existing.whoop_sleep_score != null)
+    ) {
+      console.log(`[health/submit] Blocked — date ${date} already has Whoop data for user ${user_id}`);
+      return NextResponse.json({
+        success: false,
+        skipped: true,
+        reason: 'whoop_data_exists',
+        message: `Whoop data already exists for ${date}. Apple Health write skipped — Whoop always wins.`,
+      });
+    }
+
     const { data: healthData, error } = await supabase
       .from('health_data')
       .upsert(
@@ -33,6 +59,7 @@ export async function POST(request: Request) {
           sleep_hours,
           hrv_avg: hrv,
           active_energy: steps,
+          source_device: 'apple_health',
         },
         { onConflict: 'user_id,date', ignoreDuplicates: false }
       )
