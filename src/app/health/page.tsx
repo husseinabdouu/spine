@@ -20,7 +20,7 @@ import {
 import { Line, Chart } from "react-chartjs-2";
 import { format, subDays } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
-import { Activity, Moon, Heart, Zap, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Activity, Moon, Heart, Zap, TrendingUp, TrendingDown, Minus, RefreshCw } from "lucide-react";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, BarController, LineController, Filler, Tooltip, Legend);
 
@@ -43,7 +43,7 @@ type SpendingRow = {
   amount_cents: number;
 };
 
-type Range = "30" | "60" | "90" | "all";
+type Range = "1" | "7" | "30" | "60" | "90" | "all";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -90,8 +90,9 @@ export default function HealthPage() {
   const [userId,    setUserId]    = useState<string | null>(null);
   const [health,    setHealth]    = useState<HealthRow[]>([]);
   const [spending,  setSpending]  = useState<SpendingRow[]>([]);
-  const [range,     setRange]     = useState<Range>("30");
+  const [range,     setRange]     = useState<Range>("7");
   const [loading,   setLoading]   = useState(true);
+  const [syncing,   setSyncing]   = useState(false);
 
   useEffect(() => { init(); }, []);
   useEffect(() => { if (userId) loadData(userId, range); }, [userId, range]);
@@ -107,7 +108,7 @@ export default function HealthPage() {
     setLoading(true);
     const fromDate = r === "all"
       ? "2000-01-01"
-      : format(subDays(new Date(), parseInt(r)), "yyyy-MM-dd");
+      : format(subDays(new Date(), r === "1" ? 1 : parseInt(r)), "yyyy-MM-dd");
 
     const [{ data: hData }, { data: sData }] = await Promise.all([
       supabase
@@ -130,6 +131,29 @@ export default function HealthPage() {
   }
 
   function logout() { supabase.auth.signOut().then(() => router.push("/setup")); }
+
+  async function refreshToday() {
+    if (!userId || syncing) return;
+    setSyncing(true);
+    const today     = format(new Date(), "yyyy-MM-dd");
+    const yesterday = format(subDays(new Date(), 1), "yyyy-MM-dd");
+    // Sync both today and yesterday (Whoop strain/HRV update throughout the day;
+    // yesterday's recovery score may also have been updated since last sync)
+    await Promise.allSettled([
+      fetch("/api/whoop/sync", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ user_id: userId, date: today }),
+      }),
+      fetch("/api/whoop/sync", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ user_id: userId, date: yesterday }),
+      }),
+    ]);
+    await loadData(userId, range);
+    setSyncing(false);
+  }
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
@@ -253,21 +277,34 @@ export default function HealthPage() {
             </p>
           </div>
 
-          {/* Range selector */}
-          <div className="flex gap-1 bg-white/[0.04] rounded-lg p-1 border border-[var(--border)]">
-            {(["30", "60", "90", "all"] as Range[]).map(r => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  range === r
-                    ? "bg-[var(--gold)] text-black"
-                    : "text-[var(--text-dim)] hover:text-white"
-                }`}
-              >
-                {r === "all" ? "All" : `${r}d`}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            {/* Range selector */}
+            <div className="flex gap-1 bg-white/[0.04] rounded-lg p-1 border border-[var(--border)]">
+              {(["1", "7", "30", "60", "90", "all"] as Range[]).map(r => (
+                <button
+                  key={r}
+                  onClick={() => setRange(r)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                    range === r
+                      ? "bg-[var(--gold)] text-black"
+                      : "text-[var(--text-dim)] hover:text-white"
+                  }`}
+                >
+                  {r === "all" ? "All" : r === "1" ? "1d" : r === "7" ? "7d" : `${r}d`}
+                </button>
+              ))}
+            </div>
+
+            {/* Refresh button */}
+            <button
+              onClick={refreshToday}
+              disabled={syncing}
+              title="Sync today's Whoop data"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--text-dim)] hover:text-white hover:border-white/20 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing…" : "Refresh"}
+            </button>
           </div>
         </div>
 
@@ -335,8 +372,8 @@ export default function HealthPage() {
               ))}
             </div>
 
-            {/* ── Charts grid ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* ── Charts grid (hidden for 1-day view) ── */}
+            {health.length > 1 && <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
               {/* Recovery trend */}
               <div className={`${CARD} p-5`}>
@@ -386,11 +423,13 @@ export default function HealthPage() {
                 </div>
               </div>
 
-            </div>
+            </div>}
 
             {/* ── Recent days table ── */}
             <div className={`${CARD} p-5`}>
-              <h3 className="text-sm font-semibold text-[var(--text)] mb-4">Recent Days</h3>
+              <h3 className="text-sm font-semibold text-[var(--text)] mb-4">
+                {range === "1" ? "Today" : range === "7" ? "Last 7 Days" : "Recent Days"}
+              </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -404,7 +443,7 @@ export default function HealthPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border)]">
-                    {[...health].reverse().slice(0, 14).map(row => {
+                    {[...health].reverse().slice(0, range === "1" ? 2 : range === "7" ? 7 : 14).map(row => {
                       const rec = row.whoop_recovery_score;
                       const daySpend = spendByDate[row.date] ?? 0;
                       return (
