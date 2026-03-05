@@ -47,19 +47,34 @@ export async function GET(request: Request) {
   const end   = `${date}T23:59:59.999Z`;
   const qs    = `?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=5`;
 
-  const [recovery, sleep, cycle, profile] = await Promise.all([
-    whoopRaw(`/recovery${qs}`,        token),
-    whoopRaw(`/activity/sleep${qs}`,  token),
-    whoopRaw(`/cycle${qs}`,           token),
-    whoopRaw(`/user/profile/basic`,   token),
-  ]);
+  // Probe every plausible path variant to find what Whoop actually accepts
+  const probes: Record<string, string> = {
+    cycle_date:              `/cycle${qs}`,
+    recovery_date:           `/recovery${qs}`,
+    recovery_bare:           `/recovery?limit=1`,
+    activity_recovery_bare:  `/activity/recovery?limit=1`,
+    sleep_date:              `/activity/sleep${qs}`,
+    sleep_bare:              `/activity/sleep?limit=1`,
+    sleep_root_bare:         `/sleep?limit=1`,
+    workout_bare:            `/activity/workout?limit=1`,
+    body_measurement:        `/body/measurement`,
+  };
+
+  const results = await Promise.all(
+    Object.entries(probes).map(async ([key, path]) => {
+      const r = await whoopRaw(path, token);
+      const records = (r.body as {records?: unknown[]})?.records;
+      return [key, { status: r.status, ok: r.ok, records: records?.length ?? (r.ok ? "no records key" : undefined) }] as const;
+    }),
+  );
+
+  const probeResults = Object.fromEntries(results);
+  const cycleData    = await whoopRaw(`/cycle${qs}`, token);
 
   return NextResponse.json({
     date,
     scope_stored: conn.scope,
-    profile,
-    recovery,
-    sleep,
-    cycle,
+    probes:       probeResults,
+    cycle_sample: (cycleData.body as {records?: unknown[]})?.records?.[0] ?? null,
   });
 }
