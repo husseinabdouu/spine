@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePlaidLink } from "react-plaid-link";
+import { usePlaidLink, PlaidLinkOnSuccess, PlaidLinkOnExit } from "react-plaid-link";
 import { supabase } from "@/lib/supabase/client";
 import { useToast } from "@/components/Toast";
 
@@ -86,7 +86,7 @@ export default function PlaidLink({ onSuccess }: PlaidLinkProps) {
     return () => clearTimeout(timeout);
   }, [fetchLinkToken]);
 
-  const onPlaidSuccess = useCallback(
+  const onPlaidSuccess: PlaidLinkOnSuccess = useCallback(
     async (public_token: string) => {
       if (typeof window !== "undefined") {
         localStorage.removeItem(LINK_TOKEN_KEY);
@@ -124,14 +124,13 @@ export default function PlaidLink({ onSuccess }: PlaidLinkProps) {
     [onSuccess, userId],
   );
 
-  const onPlaidExit = useCallback(
-    (err: { error_code?: string; error_message?: string } | null, metadata?: { status?: string; link_session_id?: string }) => {
+  const onPlaidExit: PlaidLinkOnExit = useCallback(
+    (err, metadata) => {
       if (err) {
         console.error("Plaid exit error:", err, metadata);
         const msg = err.error_message || err.error_code || "Connection was not completed.";
         toast(`Plaid: ${msg}`, "error");
-      } else if (metadata?.status && metadata.status !== "user_exited") {
-        // User didn't manually exit; something else happened (e.g. requires_oauth)
+      } else if (metadata.status && metadata.status !== "user_exited") {
         console.warn("Plaid exit metadata:", metadata);
         toast(`Plaid exited: ${metadata.status}. Try again or use a different bank.`, "info");
       }
