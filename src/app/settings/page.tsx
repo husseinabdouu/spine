@@ -233,7 +233,7 @@ function SettingsPageInner() {
         setBackfillResult(
           `Done — ${total.toLocaleString()} transactions in Spine` +
           (netNew > 0 ? ` (+${netNew} new this run).` : ` (no new rows added).`) +
-          (total < 600 ? " If this is less than your bank shows, disconnect + reconnect Citibank to trigger a full Plaid historical fetch." : "")
+          (total < 600 ? " Plaid is still fetching your full history in the background — run backfill again in 30 min to see it grow." : "")
         );
         toast(`Backfill complete — ${total.toLocaleString()} total transactions in Spine`, "success");
       } else {
