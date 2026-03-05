@@ -259,17 +259,10 @@ function SettingsPageInner() {
       });
       const data = await res.json();
       if (data.success) {
-        const f = data.fetched ?? {};
-        const msg = [
-          `Done — ${data.days_upserted} days upserted.`,
-          `Recovery: ${f.recovery_scored ?? "?"}/${f.recovery_total ?? "?"} scored.`,
-          `Sleep: ${f.sleep_scored ?? "?"}/${f.sleep_total ?? "?"} scored.`,
-          `Cycles: ${f.cycle_scored ?? "?"}/${f.cycle_total ?? "?"} scored.`,
-          data.sample_dates?.recovery_first ? `Recovery dates start: ${data.sample_dates.recovery_first}.` : "",
-          data.sample_dates?.sleep_first_end ? `Sleep end dates start: ${data.sample_dates.sleep_first_end}.` : "",
-        ].filter(Boolean).join(" ");
+        const msg = `Done — ${data.synced} days synced, ${data.skipped} skipped (no data), ${data.errors} errors.` +
+          (data.errors > 0 ? ` First error dates: ${(data.error_dates ?? []).join(", ")}` : "");
         setWhoopBackfillResult(msg);
-        toast(`Whoop backfill complete — ${data.days_upserted} days`, "success");
+        toast(`Whoop backfill complete — ${data.synced} days synced`, "success");
       } else {
         setWhoopBackfillResult(`Error: ${data.error}`);
         toast(data.error ?? "Backfill failed", "error");

@@ -1,317 +1,141 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { refreshWhoopToken } from "@/lib/wearables/whoop";
+import { fetchWhoopDayData, refreshWhoopToken } from "@/lib/wearables/whoop";
+import { format, subDays } from "date-fns";
 
-const WHOOP_BASE = "https://api.prod.whoop.com/developer/v1";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface WhoopPage<T> {
-  records:    T[];
-  next_token?: string | null;
-}
-
-interface WhoopRecoveryRecord {
-  created_at:  string;
-  score_state: string;
-  score: {
-    recovery_score:     number;
-    hrv_rmssd_milli:    number;
-    resting_heart_rate: number;
-  } | null;
-}
-
-interface WhoopSleepRecord {
-  start:       string;
-  end:         string;   // sleep ends in the morning — use end date to align with recovery
-  nap:         boolean;
-  score_state: string;
-  score: {
-    stage_summary: {
-      total_in_bed_time_milli:          number;
-      total_awake_time_milli:           number;
-      total_no_data_time_milli:         number;
-      total_light_sleep_time_milli:     number;
-      total_slow_wave_sleep_time_milli: number;
-      total_rem_sleep_time_milli:       number;
-    };
-    sleep_performance_percentage: number;
-    sleep_efficiency_percentage:  number;
-  } | null;
-}
-
-interface WhoopCycleRecord {
-  start:       string;
-  score_state: string;
-  score: {
-    strain:             number;
-    kilojoule:          number;
-    average_heart_rate: number;
-    max_heart_rate:     number;
-  } | null;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function toDate(isoTimestamp: string): string {
-  return isoTimestamp.slice(0, 10);
-}
-
-function sleepQuality(score: number | null): "poor" | "fair" | "good" {
-  if (score === null) return "fair";
-  if (score >= 70)    return "good";
-  if (score >= 50)    return "fair";
-  return "poor";
-}
-
-function stressLevel(hrv: number | null): "low" | "medium" | "high" {
-  if (hrv === null) return "medium";
-  if (hrv >= 65)    return "low";
-  if (hrv >= 50)    return "medium";
-  return "high";
-}
-
-async function fetchAllPages<T>(
-  path: string,
-  accessToken: string,
-  startDate: string,
-): Promise<T[]> {
-  const all: T[] = [];
-  let nextToken: string | null | undefined = undefined;
-
-  do {
-    const params = new URLSearchParams({
-      start: `${startDate}T00:00:00.000Z`,
-      limit: "25",
-    });
-    if (nextToken) params.set("nextToken", nextToken);
-
-    const res = await fetch(`${WHOOP_BASE}${path}?${params}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!res.ok) {
-      console.warn(`[whoop/backfill] ${path} returned ${res.status}`);
-      break;
-    }
-
-    const page = (await res.json()) as WhoopPage<T>;
-    all.push(...page.records);
-    nextToken = page.next_token;
-  } while (nextToken);
-
-  return all;
-}
-
-async function getValidToken(
-  supabase: ReturnType<typeof createClient>,
-  userId: string,
-): Promise<string> {
-  const { data: conn, error } = await supabase
-    .from("whoop_connections")
-    .select("access_token, refresh_token, expires_at")
-    .eq("user_id", userId)
-    .single();
-
-  if (error || !conn) throw new Error("No Whoop connection found");
-
-  const expiresAt = new Date(conn.expires_at as string).getTime();
-  if (expiresAt <= Date.now() + 5 * 60 * 1000) {
-    const refreshed  = await refreshWhoopToken(conn.refresh_token as string);
-    const newExpires = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
-    await supabase
-      .from("whoop_connections")
-      .update({
-        access_token:  refreshed.access_token,
-        refresh_token: refreshed.refresh_token,
-        expires_at:    newExpires,
-        updated_at:    new Date().toISOString(),
-      })
-      .eq("user_id", userId);
-    return refreshed.access_token;
-  }
-
-  return conn.access_token as string;
-}
-
-// ─── Route ────────────────────────────────────────────────────────────────────
-
+/**
+ * POST /api/whoop/backfill
+ *
+ * Uses the same fetchWhoopDayData function that works for the daily sync,
+ * running it across all historical dates in parallel batches of 20.
+ * This guarantees recovery + sleep + strain all align correctly per day.
+ *
+ * Body: { user_id: string, days?: number (default 730 = 2 years) }
+ */
 export async function POST(request: Request) {
   try {
     const body   = await request.json();
     const userId = body.user_id as string | undefined;
     if (!userId) return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
 
-    // Go back to Whoop's earliest supported date by default
-    const startDate: string = body.start_date ?? "2020-01-01";
+    const days = typeof body.days === "number" ? body.days : 730;
 
-    const supabase    = createClient();
-    const accessToken = await getValidToken(supabase, userId);
+    const supabase = createClient();
 
-    console.log(`[whoop/backfill] Fetching all records since ${startDate}…`);
+    // Get + refresh token
+    const { data: conn, error: connErr } = await supabase
+      .from("whoop_connections")
+      .select("access_token, refresh_token, expires_at")
+      .eq("user_id", userId)
+      .single();
 
-    // ── Fetch all three collections in parallel ────────────────────────────────
-    const [recoveryRecords, sleepRecords, cycleRecords] = await Promise.all([
-      fetchAllPages<WhoopRecoveryRecord>("/recovery",        accessToken, startDate),
-      fetchAllPages<WhoopSleepRecord>   ("/activity/sleep",  accessToken, startDate),
-      fetchAllPages<WhoopCycleRecord>   ("/cycle",           accessToken, startDate),
-    ]);
-
-    console.log(
-      `[whoop/backfill] Fetched: ${recoveryRecords.length} recovery, ` +
-      `${sleepRecords.length} sleep, ${cycleRecords.length} cycle records`,
-    );
-
-    // Log score states so we can diagnose if records are returning unscored
-    const recoveryStates: Record<string, number> = {};
-    for (const r of recoveryRecords) {
-      recoveryStates[r.score_state] = (recoveryStates[r.score_state] ?? 0) + 1;
+    if (connErr || !conn) {
+      return NextResponse.json({ error: "No Whoop connection found" }, { status: 404 });
     }
-    const sleepStates: Record<string, number> = {};
-    for (const s of sleepRecords) {
-      sleepStates[s.score_state] = (sleepStates[s.score_state] ?? 0) + 1;
-    }
-    const cycleStates: Record<string, number> = {};
-    for (const c of cycleRecords) {
-      cycleStates[c.score_state] = (cycleStates[c.score_state] ?? 0) + 1;
-    }
-    console.log("[whoop/backfill] Score states — recovery:", JSON.stringify(recoveryStates),
-      "sleep:", JSON.stringify(sleepStates), "cycle:", JSON.stringify(cycleStates));
 
-    // Log sample dates so we can see alignment
-    if (recoveryRecords.length > 0) console.log("[whoop/backfill] Recovery sample created_at:", recoveryRecords[0].created_at);
-    if (sleepRecords.length > 0)    console.log("[whoop/backfill] Sleep sample start:", sleepRecords[0].start, "end:", sleepRecords[0].end);
-    if (cycleRecords.length > 0)    console.log("[whoop/backfill] Cycle sample start:", cycleRecords[0].start);
+    let accessToken = conn.access_token as string;
+    const expiresAt = new Date(conn.expires_at as string).getTime();
 
-    // ── Index by date ──────────────────────────────────────────────────────────
-    const recoveryByDate = new Map<string, WhoopRecoveryRecord>();
-    for (const r of recoveryRecords) {
-      if (r.score_state === "SCORED" && r.score) {
-        recoveryByDate.set(toDate(r.created_at), r);
+    if (expiresAt <= Date.now() + 5 * 60 * 1000) {
+      const refreshed  = await refreshWhoopToken(conn.refresh_token as string);
+      const newExpires = new Date(Date.now() + refreshed.expires_in * 1000).toISOString();
+      await supabase.from("whoop_connections").update({
+        access_token:  refreshed.access_token,
+        refresh_token: refreshed.refresh_token,
+        expires_at:    newExpires,
+        updated_at:    new Date().toISOString(),
+      }).eq("user_id", userId);
+      accessToken = refreshed.access_token;
+    }
+
+    // Build date list oldest→newest (skip today since it's incomplete)
+    const dates: string[] = [];
+    for (let i = days; i >= 1; i--) {
+      dates.push(format(subDays(new Date(), i), "yyyy-MM-dd"));
+    }
+
+    console.log(`[whoop/backfill] Syncing ${dates.length} days for user ${userId}`);
+
+    const BATCH = 20;
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+    const errorDates: string[] = [];
+
+    for (let i = 0; i < dates.length; i += BATCH) {
+      const batch = dates.slice(i, i + BATCH);
+
+      const results = await Promise.allSettled(
+        batch.map(async (date) => {
+          const snapshot = await fetchWhoopDayData(accessToken, date);
+
+          // Skip days where Whoop returned nothing at all
+          if (
+            snapshot.sleep_hours          === null &&
+            snapshot.hrv_avg              === null &&
+            snapshot.whoop_recovery_score === null &&
+            snapshot.whoop_strain         === null
+          ) {
+            return { date, status: "skipped" as const };
+          }
+
+          const { error } = await supabase.from("health_data").upsert(
+            {
+              user_id:              userId,
+              date:                 snapshot.date,
+              sleep_hours:          snapshot.sleep_hours,
+              sleep_quality:        snapshot.sleep_quality,
+              hrv_avg:              snapshot.hrv_avg,
+              resting_heart_rate:   snapshot.resting_heart_rate,
+              stress_level:         snapshot.stress_level,
+              active_energy:        snapshot.active_energy,
+              whoop_calories:       snapshot.whoop_calories,
+              whoop_rem_mins:       snapshot.whoop_rem_mins,
+              whoop_deep_mins:      snapshot.whoop_deep_mins,
+              whoop_light_mins:     snapshot.whoop_light_mins,
+              workout_minutes:      snapshot.workout_minutes,
+              source_device:        snapshot.source_device,
+              whoop_recovery_score: snapshot.whoop_recovery_score,
+              whoop_strain:         snapshot.whoop_strain,
+              whoop_sleep_score:    snapshot.whoop_sleep_score,
+            },
+            { onConflict: "user_id,date", ignoreDuplicates: false },
+          );
+
+          if (error) {
+            console.error(`[whoop/backfill] DB error for ${date}:`, error.message);
+            return { date, status: "error" as const, message: error.message };
+          }
+
+          return { date, status: "ok" as const };
+        }),
+      );
+
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          if (r.value.status === "ok")      synced++;
+          else if (r.value.status === "skipped") skipped++;
+          else { errors++; errorDates.push(r.value.date); }
+        } else {
+          errors++;
+          console.error(`[whoop/backfill] Promise rejected:`, r.reason);
+        }
       }
     }
 
-    // Use the END date of sleep (sleep ends in the morning = same calendar day as recovery).
-    // Using start date (e.g. 11pm Mar 4) would misalign with recovery (8am Mar 5).
-    const sleepByDate = new Map<string, WhoopSleepRecord>();
-    for (const s of sleepRecords) {
-      if (s.score_state !== "SCORED" || !s.score) continue;
-      const d = toDate(s.end ?? s.start);
-      const existing = sleepByDate.get(d);
-      if (!existing || (!s.nap && existing.nap)) {
-        sleepByDate.set(d, s);
-      }
-    }
-
-    const cycleByDate = new Map<string, WhoopCycleRecord>();
-    for (const c of cycleRecords) {
-      if (c.score_state === "SCORED" && c.score) {
-        cycleByDate.set(toDate(c.start), c);
-      }
-    }
-
-    // ── Build upsert rows from the union of all dates ──────────────────────────
-    const allDates = new Set([
-      ...recoveryByDate.keys(),
-      ...sleepByDate.keys(),
-      ...cycleByDate.keys(),
-    ]);
-
-    const rows = [];
-    for (const date of allDates) {
-      const rec   = recoveryByDate.get(date) ?? null;
-      const sleep = sleepByDate.get(date)    ?? null;
-      const cycle = cycleByDate.get(date)    ?? null;
-
-      const hrv              = rec?.score?.hrv_rmssd_milli    ?? null;
-      const recoveryScore    = rec?.score?.recovery_score      ?? null;
-      const restingHeartRate = rec?.score?.resting_heart_rate  ?? null;
-
-      let sleepHours: number | null = null;
-      let remMins: number | null    = null;
-      let deepMins: number | null   = null;
-      let lightMins: number | null  = null;
-      if (sleep?.score?.stage_summary) {
-        const s = sleep.score.stage_summary;
-        const asleepMs = Math.max(
-          0,
-          s.total_in_bed_time_milli -
-          s.total_awake_time_milli -
-          s.total_no_data_time_milli,
-        );
-        sleepHours = Math.round((asleepMs / 3_600_000) * 10) / 10;
-        remMins    = Math.round(s.total_rem_sleep_time_milli       / 60_000);
-        deepMins   = Math.round(s.total_slow_wave_sleep_time_milli / 60_000);
-        lightMins  = Math.round(s.total_light_sleep_time_milli     / 60_000);
-      }
-      const sleepScore = sleep?.score?.sleep_performance_percentage ?? null;
-
-      const strain   = cycle?.score?.strain    ?? null;
-      const kjCalories = cycle?.score?.kilojoule ?? null;
-      // Convert kilojoules → kcal (1 kJ = 0.239 kcal)
-      const calories = kjCalories !== null ? Math.round(kjCalories * 0.239) : null;
-      const activeEnergy = strain !== null ? Math.round(strain * 500) : null;
-
-      rows.push({
-        user_id:              userId,
-        date,
-        sleep_hours:          sleepHours,
-        sleep_quality:        sleepQuality(sleepScore),
-        hrv_avg:              hrv !== null ? Math.round(hrv) : null,
-        resting_heart_rate:   restingHeartRate !== null ? Math.round(restingHeartRate) : null,
-        stress_level:         stressLevel(hrv),
-        active_energy:        activeEnergy,
-        whoop_calories:       calories,
-        whoop_rem_mins:       remMins,
-        whoop_deep_mins:      deepMins,
-        whoop_light_mins:     lightMins,
-        workout_minutes:      null,
-        source_device:        "whoop",
-        whoop_recovery_score: recoveryScore,
-        whoop_strain:         strain !== null ? Math.round(strain * 10) / 10 : null,
-        whoop_sleep_score:    sleepScore,
-      });
-    }
-
-    // ── Bulk upsert in batches of 100 ─────────────────────────────────────────
-    const BATCH = 100;
-    let upserted = 0;
-    for (let i = 0; i < rows.length; i += BATCH) {
-      const batch = rows.slice(i, i + BATCH);
-      const { error } = await supabase
-        .from("health_data")
-        .upsert(batch, { onConflict: "user_id,date", ignoreDuplicates: false });
-      if (error) console.error(`[whoop/backfill] Upsert error at batch ${i}:`, error);
-      else upserted += batch.length;
-    }
-
-    const scoredRecovery = recoveryRecords.filter(r => r.score_state === "SCORED").length;
-    const scoredSleep    = sleepRecords.filter(s => s.score_state === "SCORED" && !s.nap).length;
-    const scoredCycle    = cycleRecords.filter(c => c.score_state === "SCORED").length;
-
-    console.log(`[whoop/backfill] Done — upserted ${upserted} days`);
+    console.log(`[whoop/backfill] Done — synced=${synced} skipped=${skipped} errors=${errors}`);
 
     return NextResponse.json({
-      success:       true,
-      days_upserted: upserted,
-      fetched: {
-        recovery_total:  recoveryRecords.length,
-        recovery_scored: scoredRecovery,
-        sleep_total:     sleepRecords.length,
-        sleep_scored:    scoredSleep,
-        cycle_total:     cycleRecords.length,
-        cycle_scored:    scoredCycle,
-      },
-      dates_merged: allDates.size,
-      sample_dates: {
-        recovery_first: recoveryRecords[0]?.created_at?.slice(0, 10) ?? null,
-        sleep_first_end: sleepRecords[0]?.end?.slice(0, 10) ?? null,
-        cycle_first: cycleRecords[0]?.start?.slice(0, 10) ?? null,
-      },
+      success:    true,
+      days_range: days,
+      synced,
+      skipped,
+      errors,
+      error_dates: errorDates.slice(0, 5),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[whoop/backfill] Error:", message);
+    console.error("[whoop/backfill] Fatal error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
