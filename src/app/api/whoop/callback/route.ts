@@ -48,7 +48,7 @@ export async function GET(request: Request) {
           access_token:  tokens.access_token,
           refresh_token: tokens.refresh_token,
           expires_at:    expiresAt,
-          scope:         "offline read:recovery read:sleep read:cycles read:workout",
+          scope:         tokens.scope ?? "offline read:recovery read:sleep read:cycles read:workout",
           updated_at:    new Date().toISOString(),
         },
         { onConflict: "user_id" },
