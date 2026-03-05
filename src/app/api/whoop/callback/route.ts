@@ -28,8 +28,13 @@ export async function GET(request: Request) {
     const tokens = await exchangeWhoopCode(code, redirectUri);
     console.log("[whoop/callback] Token exchange OK, fetching user profile");
 
-    const whoopUserId = await getWhoopUserId(tokens.access_token);
-    console.log("[whoop/callback] Whoop user_id:", whoopUserId);
+    let whoopUserId: number | null = null;
+    try {
+      whoopUserId = await getWhoopUserId(tokens.access_token);
+      console.log("[whoop/callback] Whoop user_id:", whoopUserId);
+    } catch (profileErr) {
+      console.warn("[whoop/callback] Could not fetch Whoop user_id (non-fatal):", profileErr);
+    }
 
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 

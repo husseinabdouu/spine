@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set(
     "scope",
-    "offline read:recovery read:sleep read:cycles read:workout read:body_measurement",
+    "offline read:profile read:recovery read:sleep read:cycles read:workout read:body_measurement",
   );
   authUrl.searchParams.set("state", state);
 
