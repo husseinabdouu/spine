@@ -43,7 +43,7 @@ type SpendingRow = {
   amount_cents: number;
 };
 
-type Range = "30" | "60" | "90";
+type Range = "30" | "60" | "90" | "all";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -105,8 +105,9 @@ export default function HealthPage() {
 
   async function loadData(uid: string, r: Range) {
     setLoading(true);
-    const days     = parseInt(r);
-    const fromDate = format(subDays(new Date(), days), "yyyy-MM-dd");
+    const fromDate = r === "all"
+      ? "2000-01-01"
+      : format(subDays(new Date(), parseInt(r)), "yyyy-MM-dd");
 
     const [{ data: hData }, { data: sData }] = await Promise.all([
       supabase
@@ -254,7 +255,7 @@ export default function HealthPage() {
 
           {/* Range selector */}
           <div className="flex gap-1 bg-white/[0.04] rounded-lg p-1 border border-[var(--border)]">
-            {(["30", "60", "90"] as Range[]).map(r => (
+            {(["30", "60", "90", "all"] as Range[]).map(r => (
               <button
                 key={r}
                 onClick={() => setRange(r)}
@@ -264,7 +265,7 @@ export default function HealthPage() {
                     : "text-[var(--text-dim)] hover:text-white"
                 }`}
               >
-                {r}d
+                {r === "all" ? "All" : `${r}d`}
               </button>
             ))}
           </div>
