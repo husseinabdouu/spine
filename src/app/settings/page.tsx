@@ -147,7 +147,15 @@ function SettingsPageInner() {
   }
 
   async function disconnectBank(itemId: string) {
-    if (!userId) return;
+    if (!userId) {
+      toast("Not logged in — please refresh the page", "error");
+      return;
+    }
+    const confirmed = window.confirm(
+      "Disconnect this bank? Your existing transactions will be deleted so there are no duplicates when you reconnect. This is required to pull your full history from Plaid."
+    );
+    if (!confirmed) return;
+
     setDisconnecting(itemId);
     try {
       const res = await fetch("/api/plaid/disconnect", {
@@ -155,15 +163,22 @@ function SettingsPageInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userId, item_id: itemId }),
       });
-      const data = await res.json();
-      if (data.success) {
-        toast("Bank disconnected. Transaction history is preserved.", "info");
-        loadPlaidItems();
+      const text = await res.text();
+      let data: { success?: boolean; error?: string } = {};
+      try { data = JSON.parse(text); } catch { /* not JSON */ }
+
+      if (res.ok && data.success) {
+        toast("Bank disconnected successfully.", "success");
+        setPlaidItems(prev => prev.filter(i => i.id !== itemId));
       } else {
-        toast(data.error || "Failed to disconnect", "error");
+        const msg = data.error || `Server returned ${res.status}: ${text.slice(0, 100)}`;
+        toast(`Disconnect failed: ${msg}`, "error");
+        console.error("[disconnectBank] error:", msg);
       }
-    } catch {
-      toast("Failed to disconnect bank", "error");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast(`Disconnect failed: ${msg}`, "error");
+      console.error("[disconnectBank] network error:", msg);
     }
     setDisconnecting(null);
   }

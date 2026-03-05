@@ -58,12 +58,14 @@ export async function POST(request: Request) {
 
     if (deleteError) {
       console.error('[disconnect] DB delete error:', deleteError);
-      return NextResponse.json({ error: 'Failed to remove bank connection' }, { status: 500 });
+      return NextResponse.json({ error: `DB error: ${deleteError.message}` }, { status: 500 });
     }
 
+    console.log(`[disconnect] Successfully disconnected item ${item_id} for user ${user_id}`);
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('[disconnect] Error:', error);
-    return NextResponse.json({ error: 'Failed to disconnect bank' }, { status: 500 });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[disconnect] Unexpected error:', msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
