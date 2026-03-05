@@ -213,9 +213,14 @@ function SettingsPageInner() {
       });
       const data = await res.json();
       if (data.success) {
-        const n = data.total_transactions_processed ?? 0;
-        setBackfillResult(`Done — processed ${n.toLocaleString()} transactions from Plaid.`);
-        toast("Backfill complete!", "success");
+        const total  = data.total_in_db ?? 0;
+        const netNew = data.net_new_transactions ?? 0;
+        setBackfillResult(
+          `Done — ${total.toLocaleString()} transactions in Spine` +
+          (netNew > 0 ? ` (+${netNew} new this run).` : ` (no new rows added).`) +
+          (total < 600 ? " If this is less than your bank shows, disconnect + reconnect Citibank to trigger a full Plaid historical fetch." : "")
+        );
+        toast(`Backfill complete — ${total.toLocaleString()} total transactions in Spine`, "success");
       } else {
         setBackfillResult(`Error: ${data.error}`);
         toast(data.error ?? "Backfill failed", "error");

@@ -95,13 +95,22 @@ export async function POST(request: Request) {
       }
       console.log(`[backfill] refresh_triggered=${refreshTriggered}`);
 
-      // ── Step 2: Reset cursor and full re-sync via transactionsSync ─────────────
+      // ── Step 2: Count existing rows before sync so we can report net-new ────────
+      const { count: beforeCount } = await supabase
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user_id)
+        .not('plaid_transaction_id', 'like', 'manual_%');
+
+      const rowsBefore = beforeCount ?? 0;
+
+      // ── Step 3: Reset cursor and full re-sync via transactionsSync ─────────────
       // Deleting the cursor means the next sync starts from the very beginning
       // of Plaid's available history for this item.
       await supabase.from('plaid_items').update({ cursor: null }).eq('id', item.id);
 
       console.log(`[backfill] Running full transactionsSync from beginning...`);
-      let syncAdded = 0;
+      let plaidSyncTotal = 0;
       let cursor: string | undefined = undefined;
       let hasMore = true;
 
@@ -113,6 +122,7 @@ export async function POST(request: Request) {
         });
 
         const { added, modified, next_cursor } = response.data;
+        plaidSyncTotal += added.length;
 
         if (added.length > 0) {
           const toUpsert = added.map(tx => {
@@ -135,7 +145,6 @@ export async function POST(request: Request) {
             .upsert(toUpsert, { onConflict: 'plaid_transaction_id', ignoreDuplicates: true });
 
           if (!error) {
-            syncAdded += added.length;
             // Correct posted_at to authorized_date on pre-existing rows
             const byDate: Record<string, string[]> = {};
             for (const tx of toUpsert) {
@@ -189,35 +198,55 @@ export async function POST(request: Request) {
       if (cursor) {
         await supabase.from('plaid_items').update({ cursor }).eq('id', item.id);
       }
-      console.log(`[backfill] transactionsSync complete: ${syncAdded} processed for ${item.institution_name}`);
+      console.log(`[backfill] transactionsSync told us about ${plaidSyncTotal} transactions for ${item.institution_name}`);
 
-      // ── Step 3: transactionsGet over the explicit date range (second pass) ───
+      // ── Step 4: transactionsGet over the explicit date range (second pass) ───
       // transactionsSync and transactionsGet use different backend pipelines.
       // Running both maximises coverage.
       console.log(`[backfill] Running transactionsGet (${start_date} → ${end_date})...`);
-      const { transactions_added: getAdded } = await backfillTransactions(
+      const { transactions_added: plaidGetTotal } = await backfillTransactions(
         supabase,
         item.access_token,
         user_id,
         start_date,
         end_date,
       );
-      console.log(`[backfill] transactionsGet complete: ${getAdded} processed`);
+      console.log(`[backfill] transactionsGet saw ${plaidGetTotal} transactions`);
 
-      totalAdded += syncAdded + getAdded;
+      // ── Count actual unique rows now in DB (the only number that matters) ─────
+      const { count: afterCount } = await supabase
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user_id)
+        .not('plaid_transaction_id', 'like', 'manual_%');
+
+      const rowsAfter = afterCount ?? 0;
+      const netNew    = rowsAfter - rowsBefore;
+
+      totalAdded += netNew;
       results.push({
-        institution: item.institution_name ?? 'Unknown',
+        institution:       item.institution_name ?? 'Unknown',
         refresh_triggered: refreshTriggered,
-        from_sync: syncAdded,
-        from_get: getAdded,
+        from_sync:         plaidSyncTotal,
+        from_get:          plaidGetTotal,
       });
     }
+
+    // Count the final DB total so the UI shows an accurate number
+    const { count: finalCount } = await supabase
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user_id);
 
     return NextResponse.json({
       success: true,
       purged: purge,
       date_range: { start_date, end_date },
-      total_transactions_processed: totalAdded,
+      // net_new = rows actually inserted this run (not double-counted)
+      net_new_transactions: totalAdded,
+      // total_in_db = every transaction (Plaid + manual) currently in your account
+      total_in_db: finalCount ?? 0,
+      note: 'Plaid only serves what it has cached. If total_in_db is less than your bank shows, disconnect + reconnect Citibank so Plaid triggers a fresh HISTORICAL_UPDATE_COMPLETE.',
       by_institution: results,
     });
   } catch (error) {
