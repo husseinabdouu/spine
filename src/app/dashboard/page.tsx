@@ -12,14 +12,13 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
-  BarElement,
   PointElement,
   LineElement,
   Filler,
   Tooltip,
   Legend,
 } from "chart.js";
-import { Bar, Line } from "react-chartjs-2";
+import { Line } from "react-chartjs-2";
 import { format, subDays, startOfMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
 import {
@@ -31,7 +30,7 @@ import {
 } from "lucide-react";
 
 ChartJS.register(
-  CategoryScale, LinearScale, BarElement,
+  CategoryScale, LinearScale,
   PointElement, LineElement, Filler, Tooltip, Legend,
 );
 
@@ -103,11 +102,118 @@ function riskLevel(score: number): "LOW" | "MEDIUM" | "HIGH" {
   if (score <= 60) return "MEDIUM";
   return "HIGH";
 }
-function barColor(score: number | undefined): string {
-  if (score == null) return "rgba(201,168,76,0.55)";
-  if (score <= 30) return "rgba(74,222,128,0.65)";
-  if (score <= 60) return "rgba(250,204,21,0.65)";
-  return "rgba(248,113,113,0.65)";
+// ── Spending bar chart ────────────────────────────────────────────────────────
+// Custom HTML chart: neutral bars + baseline dotted line + per-day risk dots
+const BAR_AREA_H = 108;
+const LABEL_H    = 18;
+const DOT_AREA   = 12;
+const MAX_BAR_H  = BAR_AREA_H - DOT_AREA;
+
+function SpendingBarsChart({
+  data,
+  baseline,
+}: {
+  data: { date: string; label: string; spend: number; riskScore: number | undefined }[];
+  baseline: number;
+}) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const totalH = BAR_AREA_H + LABEL_H;
+  const maxSpend = Math.max(...data.map(d => d.spend), baseline > 0 ? baseline * 1.25 : 20, 20);
+
+  const dotColor = (score: number | undefined): string | undefined => {
+    if (score == null) return undefined;
+    if (score <= 30) return "#22c55e";
+    if (score <= 60) return "#f59e0b";
+    return "#ef4444";
+  };
+
+  return (
+    <div className="relative w-full" style={{ height: totalH }}>
+
+      {/* Baseline dotted line */}
+      {baseline > 0 && (() => {
+        const bottomPx = LABEL_H + (baseline / maxSpend) * MAX_BAR_H;
+        return (
+          <div
+            className="absolute pointer-events-none z-10"
+            style={{ left: 0, right: 36, bottom: bottomPx, borderTop: "1px dashed", borderColor: "var(--text-muted)", opacity: 0.45 }}
+          >
+            <span
+              className="absolute text-[8px] leading-none whitespace-nowrap"
+              style={{ color: "var(--text-muted)", right: -40, top: -7 }}
+            >
+              ${Math.round(baseline)}/day
+            </span>
+          </div>
+        );
+      })()}
+
+      {/* Bar columns */}
+      <div className="absolute inset-x-0 top-0 flex gap-1" style={{ height: BAR_AREA_H }}>
+        {data.map((d, i) => {
+          const barH   = d.spend > 0 ? Math.max((d.spend / maxSpend) * MAX_BAR_H, 3) : 2;
+          const color  = dotColor(d.riskScore);
+          const active = hoverIdx === i;
+          return (
+            <div
+              key={d.date}
+              className="flex-1 flex flex-col items-center justify-end h-full"
+              onMouseEnter={() => setHoverIdx(i)}
+              onMouseLeave={() => setHoverIdx(null)}
+            >
+              <div style={{ height: DOT_AREA, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {color && <div style={{ width: 5, height: 5, borderRadius: "50%", backgroundColor: color }} />}
+              </div>
+              <div
+                style={{
+                  width: "100%", height: barH, flexShrink: 0,
+                  backgroundColor: active ? "var(--gold)" : "var(--text)",
+                  opacity: active ? 0.9 : d.spend > 0 ? 0.48 : 0.13,
+                  borderRadius: "2px 2px 0 0",
+                  transition: "opacity 0.1s, background-color 0.1s",
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {/* X-axis labels */}
+      <div className="absolute inset-x-0 bottom-0 flex gap-1" style={{ height: LABEL_H }}>
+        {data.map(d => (
+          <div key={d.date} className="flex-1 text-center" style={{ fontSize: 9, color: "var(--text-muted)", lineHeight: `${LABEL_H}px` }}>
+            {d.label}
+          </div>
+        ))}
+      </div>
+
+      {/* Tooltip */}
+      {hoverIdx !== null && (() => {
+        const d     = data[hoverIdx];
+        const color = dotColor(d.riskScore);
+        const rl    = d.riskScore == null ? null : d.riskScore <= 30 ? "LOW" : d.riskScore <= 60 ? "MEDIUM" : "HIGH";
+        const diff  = baseline > 0 && d.spend > 0 ? d.spend - baseline : null;
+        const flip  = hoverIdx >= data.length - 2;
+        return (
+          <div
+            className="absolute top-1 z-20 pointer-events-none"
+            style={{ left: `${((hoverIdx + 0.5) / data.length) * 100}%`, transform: flip ? "translateX(-110%)" : "translateX(6px)" }}
+          >
+            <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg px-2.5 py-1.5 shadow-lg whitespace-nowrap backdrop-blur-sm" style={{ fontSize: 11 }}>
+              <p className="font-semibold text-[var(--text)]">{format(parseLocalDate(d.date), "EEE, MMM d")}</p>
+              <p className="text-[var(--text-dim)] mt-0.5">{d.spend > 0 ? `$${d.spend.toFixed(2)} spent` : "No spending"}</p>
+              {rl && <p className="mt-0.5 font-medium" style={{ color: color ?? "inherit" }}>{rl} risk</p>}
+              {diff !== null && (
+                <p className="mt-0.5" style={{ color: "var(--text-muted)" }}>
+                  {diff > 0 ? `$${diff.toFixed(0)} above baseline` : `$${Math.abs(diff).toFixed(0)} below baseline`}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
 }
 function recoveryColor(score: number) {
   if (score >= 67) return "var(--safe)";
@@ -972,44 +1078,13 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            {/* Weekly spend chart with risk colors */}
+            {/* Weekly spend chart */}
             <div className="mb-5">
-              <div className="text-xs font-medium text-[var(--text-muted)] mb-2">
-                7-day spending
-                <span className="ml-2 text-[10px] text-[var(--text-muted)] opacity-60">
-                  (green=low · amber=med · red=high risk)
-                </span>
-              </div>
-              {weeklyChartData.some(d => d.spend > 0) ? (
-                <div className="h-28">
-                  <Bar
-                    data={{
-                      labels: weeklyChartData.map(d => d.label),
-                      datasets: [{
-                        data: weeklyChartData.map(d => d.spend),
-                        backgroundColor: weeklyChartData.map(d => barColor(d.riskScore)),
-                        borderRadius: 4,
-                        borderSkipped: false,
-                      }],
-                    }}
-                    options={{
-                      responsive: true, maintainAspectRatio: false,
-                      plugins: {
-                        legend: { display: false },
-                        tooltip: { callbacks: { label: ctx => `$${(ctx.parsed.y ?? 0).toFixed(2)}` } },
-                      },
-                      scales: {
-                        x: { grid: { display: false }, ticks: { color: chartTick, font: { size: 10 } }, border: { display: false } },
-                        y: { grid: { color: chartGrid }, ticks: { color: chartTick, font: { size: 10 }, callback: v => `$${v}` }, border: { display: false } },
-                      },
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="h-28 flex items-center justify-center text-xs text-[var(--text-muted)]">
-                  No spending data yet
-                </div>
-              )}
+              <p className="text-xs font-medium text-[var(--text-muted)] mb-2">7-day spending</p>
+              <SpendingBarsChart data={weeklyChartData} baseline={baseline} />
+              <p className="text-[10px] text-[var(--text-muted)] mt-1.5 opacity-60">
+                Dots show your behavioral risk level each day
+              </p>
             </div>
 
             {/* On days like today */}
