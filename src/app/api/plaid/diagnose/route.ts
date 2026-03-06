@@ -109,9 +109,12 @@ export async function POST(request: Request) {
       console.warn("[diagnose] accountsGet failed:", e);
     }
 
-    // ── 6. Plaid total_transactions for the full range ────────────────────────
-    const today       = format(new Date(), "yyyy-MM-dd");
-    const cutoffDate  = format(subMonths(new Date(), months), "yyyy-MM-dd");
+    // ── 6. ONE Plaid call for the full range total ────────────────────────────
+    // We only make a single API call to Plaid (count=1, just to read
+    // total_transactions) to avoid rate-limiting. Month-by-month Plaid counts
+    // are intentionally omitted — only DB counts are shown per month.
+    const today      = format(new Date(), "yyyy-MM-dd");
+    const cutoffDate = format(subMonths(new Date(), months), "yyyy-MM-dd");
 
     let plaidTotalClaim = 0;
     let plaidTotalError: string | null = null;
@@ -120,28 +123,26 @@ export async function POST(request: Request) {
         access_token: item.access_token,
         start_date:   cutoffDate,
         end_date:     today,
-        options:      { count: 1, offset: 0, include_personal_finance_category: true },
+        options:      { count: 1, offset: 0 },
       });
       plaidTotalClaim = txData.total_transactions;
     } catch (e: unknown) {
       plaidTotalError = (e as { response?: { data?: { error_message?: string } } })?.response?.data?.error_message ?? String(e);
     }
 
-    // ── 7. Month-by-month breakdown ───────────────────────────────────────────
+    // ── 7. Month-by-month DB counts only (no per-month Plaid calls) ───────────
     const monthlyBreakdown: {
       month: string;
-      plaid_count:   number | null;
-      db_count:      number;
-      plaid_error?:  string;
+      plaid_count: number | null;
+      db_count: number;
     }[] = [];
 
     for (let m = months - 1; m >= 0; m--) {
-      const refDate   = subMonths(new Date(), m);
-      const monthStr  = format(refDate, "yyyy-MM");
+      const refDate    = subMonths(new Date(), m);
+      const monthStr   = format(refDate, "yyyy-MM");
       const monthStart = format(startOfMonth(refDate), "yyyy-MM-dd");
       const monthEnd   = format(endOfMonth(refDate),   "yyyy-MM-dd");
 
-      // DB count for this month
       const { count: dbMonthCount } = await supabase
         .from("transactions")
         .select("id", { count: "exact", head: true })
@@ -149,32 +150,14 @@ export async function POST(request: Request) {
         .gte("posted_at", monthStart)
         .lte("posted_at", monthEnd);
 
-      // Plaid count for this month (count=1 just to read total_transactions)
-      let plaidMonthCount: number | null = null;
-      let plaidMonthError: string | undefined;
-      try {
-        const { data: mData } = await plaidClient.transactionsGet({
-          access_token: item.access_token,
-          start_date:   monthStart,
-          end_date:     monthEnd,
-          options:      { count: 1, offset: 0 },
-        });
-        plaidMonthCount = mData.total_transactions;
-      } catch (e: unknown) {
-        plaidMonthError = (e as { response?: { data?: { error_message?: string } } })?.response?.data?.error_message ?? String(e);
-      }
-
       monthlyBreakdown.push({
-        month:        monthStr,
-        plaid_count:  plaidMonthCount,
-        db_count:     dbMonthCount ?? 0,
-        ...(plaidMonthError ? { plaid_error: plaidMonthError } : {}),
+        month:       monthStr,
+        plaid_count: null, // not fetched per-month to avoid rate limiting
+        db_count:    dbMonthCount ?? 0,
       });
     }
 
-    const totalPlaidFromMonths = monthlyBreakdown.reduce(
-      (sum, m) => sum + (m.plaid_count ?? 0), 0
-    );
+    const totalPlaidFromMonths = plaidTotalClaim;
 
     return NextResponse.json({
       db: {
