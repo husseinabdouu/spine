@@ -21,17 +21,19 @@ export default function SetupPage() {
     if (data.session) router.push("/dashboard");
   }
 
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin;
+
   async function loginWithGoogle() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/dashboard` },
+      options: { redirectTo: `${APP_URL}/auth/callback` },
     });
   }
 
   async function loginWithGitHub() {
     await supabase.auth.signInWithOAuth({
       provider: "github",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: `${APP_URL}/auth/callback` },
     });
   }
 
@@ -44,7 +46,7 @@ export default function SetupPage() {
         const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/dashboard` },
+          options: { emailRedirectTo: `${APP_URL}/dashboard` },
         });
         if (error) setAuthError(error.message);
         else       setAuthError("Check your email for a confirmation link.");
