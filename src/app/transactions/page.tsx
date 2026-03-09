@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import AppShell from "@/components/AppShell";
@@ -16,7 +16,7 @@ import {
 import { Bar, Doughnut } from "react-chartjs-2";
 import { format, subDays } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
-import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, TrendingUp } from "lucide-react";
+import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, TrendingUp, ChevronUp, Check } from "lucide-react";
 import {
   USER_CATEGORIES,
   INCOME_CATEGORIES,
@@ -32,7 +32,20 @@ type Transaction = {
   description: string | null;
   amount_cents: number;
   posted_at: string;
+  posted_at_timestamp: string | null;
   category: string | null;
+  notes: string | null;
+  is_necessary_expense: boolean | null;
+};
+
+type EditState = {
+  amount: string;
+  date: string;
+  time: string;
+  merchant: string;
+  category: string;
+  notes: string;
+  is_necessary_expense: boolean;
 };
 
 type AddForm = {
@@ -45,6 +58,29 @@ type AddForm = {
 
 const INPUT_CLS =
   "w-full px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--gold)]/50 text-sm";
+
+const EDIT_INPUT_CLS =
+  "w-full px-2.5 py-1.5 bg-[rgba(255,255,255,0.06)] border border-[var(--glass-border)] rounded-md text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/60 text-sm";
+
+function toEditState(t: Transaction): EditState {
+  const dateStr = String(t.posted_at).slice(0, 10);
+  let timeStr = "00:00";
+  if (t.posted_at_timestamp) {
+    const d = new Date(t.posted_at_timestamp);
+    if (!isNaN(d.getTime())) {
+      timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+  }
+  return {
+    amount: (Math.abs(t.amount_cents) / 100).toFixed(2),
+    date: dateStr,
+    time: timeStr,
+    merchant: t.merchant_name || t.description || "",
+    category: resolveCategory(t.category),
+    notes: t.notes || "",
+    is_necessary_expense: t.is_necessary_expense ?? false,
+  };
+}
 
 export default function TransactionsPage() {
   const router = useRouter();
@@ -65,6 +101,12 @@ export default function TransactionsPage() {
     merchant: "",
     category: "Food & Drink",
   });
+
+  // Expand/edit state
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editStates, setEditStates] = useState<Record<string, EditState>>({});
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const savedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
     checkAuth();
@@ -87,7 +129,7 @@ export default function TransactionsPage() {
     setLoading(true);
     let query = supabase
       .from("transactions")
-      .select("id, merchant_name, description, amount_cents, posted_at, category")
+      .select("id, merchant_name, description, amount_cents, posted_at, posted_at_timestamp, category, notes, is_necessary_expense")
       .order("posted_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(10000);
@@ -103,6 +145,91 @@ export default function TransactionsPage() {
   }, [dateRange]);
 
   useEffect(() => { loadTransactions(); }, [loadTransactions]);
+
+  function toggleExpand(t: Transaction) {
+    if (expandedId === t.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(t.id);
+    if (!editStates[t.id]) {
+      setEditStates(prev => ({ ...prev, [t.id]: toEditState(t) }));
+    }
+  }
+
+  function updateEdit(id: string, patch: Partial<EditState>) {
+    setEditStates(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
+
+  function showSaved(id: string) {
+    setSavedIds(prev => new Set(prev).add(id));
+    if (savedTimers.current[id]) clearTimeout(savedTimers.current[id]);
+    savedTimers.current[id] = setTimeout(() => {
+      setSavedIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }, 2000);
+  }
+
+  async function saveField(id: string, overrideEdit?: Partial<EditState>) {
+    const base = editStates[id];
+    if (!base) return;
+    const edit = overrideEdit ? { ...base, ...overrideEdit } : base;
+
+    const amountVal = parseFloat(edit.amount);
+    if (isNaN(amountVal) || amountVal <= 0) return;
+
+    const newCents = Math.round(amountVal * 100);
+
+    // Build posted_at_timestamp from date + time
+    let newTimestamp: string | null = null;
+    if (edit.date) {
+      const [h, m] = edit.time.split(":").map(Number);
+      const d = new Date(`${edit.date}T${String(h || 0).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}:00`);
+      if (!isNaN(d.getTime())) newTimestamp = d.toISOString();
+    }
+
+    const updates: Record<string, unknown> = {
+      amount_cents: newCents,
+      posted_at: edit.date,
+      posted_at_timestamp: newTimestamp,
+      merchant_name: edit.merchant || null,
+      description: edit.merchant || null,
+      category: edit.category,
+      notes: edit.notes || null,
+      is_necessary_expense: edit.is_necessary_expense,
+    };
+
+    const { error } = await supabase
+      .from("transactions")
+      .update(updates)
+      .eq("id", id);
+
+    if (!error) {
+      setTransactions(prev =>
+        prev.map(t =>
+          t.id === id
+            ? {
+                ...t,
+                amount_cents: newCents,
+                posted_at: edit.date,
+                posted_at_timestamp: newTimestamp,
+                merchant_name: edit.merchant || null,
+                description: edit.merchant || null,
+                category: edit.category,
+                notes: edit.notes || null,
+                is_necessary_expense: edit.is_necessary_expense,
+              }
+            : t
+        )
+      );
+      showSaved(id);
+    } else {
+      console.error("Save failed:", error);
+    }
+  }
 
   const updateCategory = useCallback(async (id: string, newCat: string) => {
     setTransactions(prev => prev.map(t => t.id === id ? { ...t, category: newCat } : t));
@@ -175,10 +302,9 @@ export default function TransactionsPage() {
 
   const chartData = useMemo(() => {
     if (dateRange === "all") {
-      // Group by month for the "all time" view
       const byMonth: Record<string, number> = {};
       filteredSpending.forEach(t => {
-        const month = String(t.posted_at).slice(0, 7); // YYYY-MM
+        const month = String(t.posted_at).slice(0, 7);
         byMonth[month] = (byMonth[month] || 0) + t.amount_cents / 100;
       });
       return Object.keys(byMonth)
@@ -202,6 +328,135 @@ export default function TransactionsPage() {
   const totalIncome = useMemo(() => income.reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100, [income]);
 
   function getName(t: Transaction) { return t.merchant_name || t.description || "Unknown"; }
+
+  function renderExpandedEdit(t: Transaction) {
+    const edit = editStates[t.id];
+    if (!edit) return null;
+    const isSaved = savedIds.has(t.id);
+
+    return (
+      <div className="px-4 pb-4 bg-[rgba(255,255,255,0.025)] border-t border-[var(--glass-border)]">
+        <div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Amount */}
+          <div>
+            <label className="text-xs text-[var(--text-muted)] mb-1 block">Amount ($)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={edit.amount}
+              onChange={e => updateEdit(t.id, { amount: e.target.value })}
+              onBlur={() => saveField(t.id)}
+              className={EDIT_INPUT_CLS}
+            />
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="text-xs text-[var(--text-muted)] mb-1 block">Date</label>
+            <input
+              type="date"
+              value={edit.date}
+              onChange={e => updateEdit(t.id, { date: e.target.value })}
+              onBlur={() => saveField(t.id)}
+              className={EDIT_INPUT_CLS}
+            />
+          </div>
+
+          {/* Time */}
+          <div>
+            <label className="text-xs text-[var(--text-muted)] mb-1 block">Time</label>
+            <input
+              type="time"
+              value={edit.time}
+              onChange={e => updateEdit(t.id, { time: e.target.value })}
+              onBlur={() => saveField(t.id)}
+              className={EDIT_INPUT_CLS}
+            />
+          </div>
+
+          {/* Merchant */}
+          <div>
+            <label className="text-xs text-[var(--text-muted)] mb-1 block">Merchant</label>
+            <input
+              type="text"
+              value={edit.merchant}
+              onChange={e => updateEdit(t.id, { merchant: e.target.value })}
+              onBlur={() => saveField(t.id)}
+              className={EDIT_INPUT_CLS}
+              placeholder="Merchant name"
+            />
+          </div>
+
+          {/* Category */}
+          <div>
+            <label className="text-xs text-[var(--text-muted)] mb-1 block">Category</label>
+            <select
+              value={edit.category}
+              onChange={e => {
+                const newCat = e.target.value;
+                updateEdit(t.id, { category: newCat });
+                saveField(t.id, { category: newCat });
+              }}
+              className={EDIT_INPUT_CLS}
+            >
+              {USER_CATEGORIES.map(c => (
+                <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Notes — full width */}
+          <div className="sm:col-span-2">
+            <label className="text-xs text-[var(--text-muted)] mb-1 block">Notes</label>
+            <textarea
+              value={edit.notes}
+              onChange={e => updateEdit(t.id, { notes: e.target.value })}
+              onBlur={() => saveField(t.id)}
+              rows={2}
+              placeholder="Add a note..."
+              className={`${EDIT_INPUT_CLS} resize-none`}
+            />
+          </div>
+
+          {/* Necessary expense + saved indicator */}
+          <div className="sm:col-span-2 flex items-center justify-between">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={edit.is_necessary_expense}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    updateEdit(t.id, { is_necessary_expense: checked });
+                    saveField(t.id, { is_necessary_expense: checked });
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 rounded-full border border-[var(--glass-border)] bg-[rgba(255,255,255,0.06)] peer-checked:bg-[var(--gold)] transition-colors" />
+                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[var(--text-muted)] peer-checked:translate-x-4 peer-checked:bg-[#080808] transition-all" />
+              </div>
+              <span className="text-xs text-[var(--text-dim)]">Necessary expense</span>
+            </label>
+
+            <div className={`flex items-center gap-1.5 text-xs font-medium transition-all duration-300 ${isSaved ? "opacity-100 text-[var(--safe)]" : "opacity-0"}`}>
+              <Check className="w-3.5 h-3.5" />
+              Saved
+            </div>
+          </div>
+        </div>
+
+        {/* Collapse */}
+        <button
+          onClick={() => setExpandedId(null)}
+          className="mt-3 flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-dim)] transition-colors"
+        >
+          <ChevronUp className="w-3.5 h-3.5" />
+          Collapse
+        </button>
+      </div>
+    );
+  }
 
   return (
     <AppShell title="Transactions" userEmail={userEmail} onLogout={logout}>
@@ -343,33 +598,47 @@ export default function TransactionsPage() {
               ) : filteredSpending.map(t => {
                 const cat = resolveCategory(t.category);
                 const color = CATEGORY_COLORS[cat] || "#71717a";
+                const isExpanded = expandedId === t.id;
                 return (
-                  <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-[var(--glass-hover-subtle)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
-                        <CreditCard className="w-4 h-4" style={{ color }} />
+                  <div key={t.id} className={`transition-colors ${isExpanded ? "bg-[rgba(255,255,255,0.03)]" : ""}`}>
+                    {/* Row */}
+                    <div
+                      className="flex items-center justify-between px-4 py-3 hover:bg-[var(--glass-hover-subtle)] transition-colors cursor-pointer"
+                      onClick={() => toggleExpand(t)}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
+                          <CreditCard className="w-4 h-4" style={{ color }} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-medium text-[var(--text)] text-sm truncate">{getName(t)}</div>
+                          <div className="text-xs text-[var(--text-dim)] mt-0.5">{format(parseLocalDate(String(t.posted_at)), "MMM d, yyyy")}</div>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="font-medium text-[var(--text)] text-sm truncate">{getName(t)}</div>
-                        <div className="text-xs text-[var(--text-dim)] mt-0.5">{format(parseLocalDate(String(t.posted_at)), "MMM d, yyyy")}</div>
+                      <div className="flex items-center gap-4 shrink-0 ml-4">
+                        {/* Inline category pill — stop propagation so click doesn't toggle expand */}
+                        <select
+                          value={cat}
+                          onChange={e => { e.stopPropagation(); updateCategory(t.id, e.target.value); }}
+                          onClick={e => e.stopPropagation()}
+                          className="text-xs px-2.5 py-1 rounded-full border cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/50 transition-colors"
+                          style={{ backgroundColor: `${color}15`, borderColor: `${color}50`, color }}
+                        >
+                          {USER_CATEGORIES.map(c => (
+                            <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>{c}</option>
+                          ))}
+                        </select>
+                        <div className="text-sm font-semibold text-[var(--text-dim)] w-20 text-right tabular-nums">
+                          -${(t.amount_cents / 100).toFixed(2)}
+                        </div>
+                        <ChevronUp
+                          className={`w-4 h-4 text-[var(--text-muted)] transition-transform duration-200 ${isExpanded ? "rotate-0" : "rotate-180"}`}
+                        />
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 shrink-0 ml-4">
-                      {/* Inline category selector — click to change */}
-                      <select
-                        value={cat}
-                        onChange={e => updateCategory(t.id, e.target.value)}
-                        className="text-xs px-2.5 py-1 rounded-full border cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/50 transition-colors"
-                        style={{ backgroundColor: `${color}15`, borderColor: `${color}50`, color }}
-                      >
-                        {USER_CATEGORIES.map(c => (
-                          <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>{c}</option>
-                        ))}
-                      </select>
-                      <div className="text-sm font-semibold text-[var(--text-dim)] w-20 text-right tabular-nums">
-                        -${(t.amount_cents / 100).toFixed(2)}
-                      </div>
-                    </div>
+
+                    {/* Expanded edit panel */}
+                    {isExpanded && renderExpandedEdit(t)}
                   </div>
                 );
               })}
