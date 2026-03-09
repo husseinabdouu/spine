@@ -5,7 +5,7 @@ export const USER_CATEGORIES = [
   "Outings",
   "Essentials",
   "Gifts",
-  "Others",
+  "Other",
 ] as const;
 
 /** Categories that appear in the DB but are never counted as behavioral spending. */
@@ -40,7 +40,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   "Outings": "#ec4899",
   "Essentials": "#22c55e",
   "Gifts": "#ef4444",
-  "Others": "#71717a",
+  "Other": "#71717a",
   "Internal Transfer": "#3b82f6",
   "ATM Withdrawal": "#a855f7",
   "Income": "#10b981",
@@ -123,31 +123,31 @@ const PLAID_TO_USER: Record<string, UserCategory> = {
   CHARITY: "Gifts",
   DONATIONS: "Gifts",
 
-  // Others
-  BANK_FEES: "Others",
-  GOVERNMENT_AND_NON_PROFIT: "Others",
-  GENERAL_SERVICES: "Others",
-  LOAN_PAYMENTS: "Others",
-  TRANSFER_OUT: "Others",
-  OVERDRAFT: "Others",
-  FRAUD_DISPUTE: "Others",
-  ATM: "Others",
-  BUSINESS_AND_PROFESSIONAL_SERVICES: "Others",
-  FINANCIAL_PLANNING: "Others",
-  TAXES: "Others",
-  LEGAL_SERVICES: "Others",
-  ACCOUNTANTS: "Others",
+  // Other
+  BANK_FEES: "Other",
+  GOVERNMENT_AND_NON_PROFIT: "Other",
+  GENERAL_SERVICES: "Other",
+  LOAN_PAYMENTS: "Other",
+  TRANSFER_OUT: "Other",
+  OVERDRAFT: "Other",
+  FRAUD_DISPUTE: "Other",
+  ATM: "Other",
+  BUSINESS_AND_PROFESSIONAL_SERVICES: "Other",
+  FINANCIAL_PLANNING: "Other",
+  TAXES: "Other",
+  LEGAL_SERVICES: "Other",
+  ACCOUNTANTS: "Other",
 };
 
 export function mapPlaidCategory(raw: string | null | undefined): UserCategory {
-  if (!raw) return "Others";
+  if (!raw) return "Other";
   const key = raw.toUpperCase().replace(/[\s\-]+/g, "_");
-  return PLAID_TO_USER[key] ?? "Others";
+  return PLAID_TO_USER[key] ?? "Other";
 }
 
 // Handles both stored custom categories and legacy Plaid raw strings
 export function resolveCategory(category: string | null | undefined): AnyCategory {
-  if (!category) return "Others";
+  if (!category) return "Other";
   if ((ALL_CATEGORIES as readonly string[]).includes(category)) return category as AnyCategory;
   return mapPlaidCategory(category);
 }
