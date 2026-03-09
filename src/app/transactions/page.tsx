@@ -16,7 +16,7 @@ import {
 import { Bar, Doughnut } from "react-chartjs-2";
 import { format, subDays } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
-import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, TrendingUp, ChevronUp, Check, Upload, FileText } from "lucide-react";
+import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, TrendingUp, ChevronUp, Check, Upload, FileText } from "lucide-react";
 import {
   USER_CATEGORIES,
   ALL_CATEGORIES,
@@ -152,7 +152,7 @@ function parseAmount(raw: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-// Origin AI Transfer-type description keywords (case-insensitive)
+// Origin AI description keyword lists (case-insensitive matching)
 const TRANSFER_DESC_KEYWORDS = [
   "ONLINE TRANSFER TO", "ONLINE TRANSFER FROM",
   "TRANSFER TO SAVINGS", "TRANSFER FROM SAVINGS",
@@ -166,18 +166,19 @@ const ZELLE_PAYMENT_KW     = ["ZELLE PAYMENT", "VENMO PAYMENT", "CASH APP PAYMEN
 
 // Origin AI Expense-type category → Spine category
 const ORIGIN_EXPENSE_CAT: Record<string, string> = {
-  "drinks & dining": "Food & Drink",
-  "food & drink":    "Food & Drink",
-  "groceries":       "Essentials",
-  "auto & transport":"Transportation",
-  "transportation":  "Transportation",
-  "shopping":        "Shopping",
-  "entertainment":   "Outings",
-  "health":          "Essentials",
-  "personal care":   "Essentials",
-  "education":       "Essentials",
-  "gifts":           "Gifts",
-  "other":           "Others",
+  "drinks & dining":  "Food & Drink",
+  "food & drink":     "Food & Drink",
+  "groceries":        "Essentials",
+  "auto & transport": "Transportation",
+  "transportation":   "Transportation",
+  "shopping":         "Shopping",
+  "entertainment":    "Outings",
+  "health":           "Essentials",
+  "healthcare":       "Essentials",
+  "personal care":    "Essentials",
+  "education":        "Essentials",
+  "gifts":            "Gifts",
+  "other":            "Others",
 };
 
 function matchesAny(text: string, keywords: string[]): boolean {
@@ -187,31 +188,30 @@ function matchesAny(text: string, keywords: string[]): boolean {
 
 /**
  * Categorize a row from an Origin AI CSV export.
+ * Description keywords are checked first regardless of Type column, so ATM rows
+ * with Type="Transfer" are caught correctly before the transfer fallback.
  *
  * @param typeCol  Value of the "Type" column (e.g. "Transfer", "Expense")
  * @param desc     Description / merchant name
  * @param catCol   Value of the "Category" column from Origin AI
  */
 function originCategorize(typeCol: string, desc: string, catCol: string): string {
+  // Description keyword checks always win — applied regardless of Type value
+  if (matchesAny(desc, TRANSFER_DESC_KEYWORDS))  return "Internal Transfer";
+  if (matchesAny(desc, ATM_DESC_KEYWORDS))        return "ATM Withdrawal";
+  if (matchesAny(desc, ZELLE_CREDIT_KW))          return "Income";
+  if (matchesAny(desc, INCOME_DESC_KEYWORDS))     return "Income";
+  if (matchesAny(desc, ZELLE_PAYMENT_KW))         return "Others";
+
   const type = typeCol.trim().toLowerCase();
-
   if (type === "transfer") {
-    if (matchesAny(desc, TRANSFER_DESC_KEYWORDS))    return "Internal Transfer";
-    if (matchesAny(desc, ATM_DESC_KEYWORDS))         return "ATM Withdrawal";
-    if (matchesAny(desc, ZELLE_CREDIT_KW))           return "Income";
-    if (matchesAny(desc, INCOME_DESC_KEYWORDS))      return "Income";
-    if (matchesAny(desc, ZELLE_PAYMENT_KW))          return "Others";
-    return "Internal Transfer"; // unmatched transfer → safest default
+    // Unmatched transfer with no description keyword → safest default
+    return "Internal Transfer";
   }
 
-  if (type === "expense" || type === "") {
-    const mapped = ORIGIN_EXPENSE_CAT[catCol.trim().toLowerCase()];
-    if (mapped) return mapped;
-    return "Others";
-  }
-
-  // Unknown type — fall through to Others
-  return "Others";
+  // Type = "Expense" or unknown → map Origin category to Spine
+  const mapped = ORIGIN_EXPENSE_CAT[catCol.trim().toLowerCase()];
+  return mapped ?? "Others";
 }
 
 /**
@@ -617,8 +617,10 @@ export default function TransactionsPage() {
     );
   }, [income, search]);
 
-  // Exclude non-behavioral categories from charts and totals (but keep them in the list)
-  const CHART_EXCLUDE_CATS = new Set(["Internal Transfer", "ATM Withdrawal"]);
+  // Categories excluded from totals and charts (non-behavioral money movements)
+  const CHART_EXCLUDE_CATS = new Set(["Internal Transfer", "ATM Withdrawal", "Income"]);
+
+  // billableSpending = positive-amount_cents rows that count toward behavioral spending
   const billableSpending = useMemo(
     () => filteredSpending.filter(t => !CHART_EXCLUDE_CATS.has(resolveCategory(t.category))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -656,10 +658,19 @@ export default function TransactionsPage() {
       const ds = format(d, "yyyy-MM-dd");
       return { label: format(d, "MMM d"), spend: byDay[ds] || 0 };
     });
-  }, [filteredSpending, dateRange]);
+  }, [billableSpending, dateRange]);
 
-  const totalSpend = useMemo(() => billableSpending.reduce((s, t) => s + t.amount_cents, 0) / 100, [billableSpending]);
-  const totalIncome = useMemo(() => income.reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100, [income]);
+  const totalSpend = useMemo(
+    () => billableSpending.reduce((s, t) => s + t.amount_cents, 0) / 100,
+    [billableSpending]
+  );
+  // totalIncome: only rows with negative amount_cents AND category = Income
+  const totalIncome = useMemo(
+    () => income
+      .filter(t => resolveCategory(t.category) === "Income")
+      .reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100,
+    [income]
+  );
 
   function getName(t: Transaction) { return t.merchant_name || t.description || "Unknown"; }
 
@@ -1102,20 +1113,26 @@ export default function TransactionsPage() {
               ) : filteredSpending.map(t => {
                 const cat = resolveCategory(t.category);
                 const color = CATEGORY_COLORS[cat] || "#71717a";
-                const isExpanded = expandedId === t.id;
+                const isExpanded  = expandedId === t.id;
+                const isTransfer  = cat === "Internal Transfer";
+                const isAtm       = cat === "ATM Withdrawal";
+                const isExcluded  = isTransfer || isAtm;
                 return (
-                  <div key={t.id} className={`transition-colors ${isExpanded ? "bg-[rgba(255,255,255,0.03)]" : ""}`}>
+                  <div key={t.id} className={`transition-colors ${isExpanded ? "bg-[rgba(255,255,255,0.03)]" : ""} ${isExcluded ? "opacity-50" : ""}`}>
                     <div
                       className="flex items-center justify-between px-4 py-3 hover:bg-[var(--glass-hover-subtle)] transition-colors cursor-pointer"
                       onClick={() => toggleExpand(t)}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
-                          <CreditCard className="w-4 h-4" style={{ color }} />
+                          {isTransfer
+                            ? <ArrowLeftRight className="w-4 h-4" style={{ color }} />
+                            : <CreditCard className="w-4 h-4" style={{ color }} />
+                          }
                         </div>
                         <div className="min-w-0">
-                          <div className="font-medium text-[var(--text)] text-sm truncate">{getName(t)}</div>
-                          <div className="text-xs text-[var(--text-dim)] mt-0.5">{format(parseLocalDate(String(t.posted_at)), "MMM d, yyyy")}</div>
+                          <div className={`font-medium text-sm truncate ${isExcluded ? "text-[var(--text-muted)]" : "text-[var(--text)]"}`}>{getName(t)}</div>
+                          <div className="text-xs text-[var(--text-muted)] mt-0.5">{format(parseLocalDate(String(t.posted_at)), "MMM d, yyyy")}</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-4 shrink-0 ml-4">
@@ -1130,8 +1147,8 @@ export default function TransactionsPage() {
                             <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>{c}</option>
                           ))}
                         </select>
-                        <div className="text-sm font-semibold text-[var(--text-dim)] w-20 text-right tabular-nums">
-                          -${(t.amount_cents / 100).toFixed(2)}
+                        <div className={`text-sm font-semibold w-20 text-right tabular-nums ${isExcluded ? "text-[var(--text-muted)]" : "text-[var(--text-dim)]"}`}>
+                          ${(t.amount_cents / 100).toFixed(2)}
                         </div>
                         <ChevronUp
                           className={`w-4 h-4 text-[var(--text-muted)] transition-transform duration-200 ${isExpanded ? "rotate-0" : "rotate-180"}`}
