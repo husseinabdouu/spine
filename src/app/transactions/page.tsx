@@ -165,16 +165,40 @@ const INCOME_KEYWORDS = [
 const PEER_PAYMENT_KEYWORDS = ["ZELLE PAYMENT", "VENMO PAYMENT", "CASH APP PAYMENT"];
 
 /**
- * Auto-categorize a CSV row based on description keywords.
+ * Auto-categorize a CSV row based on description keywords (case-insensitive).
  * Returns the override category, or null if the mapped CSV category should be used.
  */
 function autoCategorize(description: string): string | null {
   const upper = description.toUpperCase();
-  if (TRANSFER_KEYWORDS.some(k => upper.includes(k))) return "Internal Transfer";
-  if (ATM_KEYWORDS.some(k => upper.includes(k))) return "ATM Withdrawal";
-  if (INCOME_KEYWORDS.some(k => upper.includes(k))) return "Income";
-  if (PEER_PAYMENT_KEYWORDS.some(k => upper.includes(k))) return null; // keep CSV category
+  if (TRANSFER_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return "Internal Transfer";
+  if (ATM_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return "ATM Withdrawal";
+  if (INCOME_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return "Income";
+  if (PEER_PAYMENT_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return null;
   return null;
+}
+
+/**
+ * Determine the correct sign for amount_cents for a CSV row from Origin AI / bank exports.
+ *
+ * Origin AI exports ALL transactions as negative numbers in bank statement format:
+ *   - Negative in CSV + income keyword  → store as negative (income)
+ *   - Negative in CSV + regular expense → flip to positive (expense)
+ *   - Positive in CSV                   → already income convention, store as negative
+ *
+ * Returns the signed amount_cents ready to store in the DB.
+ */
+function resolveAmountCents(rawAmount: number, description: string): number {
+  const isIncomeByKeyword =
+    INCOME_KEYWORDS.some(k => description.toUpperCase().includes(k.toUpperCase()));
+
+  if (rawAmount < 0) {
+    // Bank statement format: negative = money out (expense) OR income keyword
+    if (isIncomeByKeyword) return Math.round(rawAmount * 100); // keep negative → income
+    return Math.round(-rawAmount * 100); // flip → positive → expense
+  } else {
+    // Positive raw amount = money coming in → store as negative (income convention)
+    return Math.round(-rawAmount * 100);
+  }
 }
 
 /** Try to parse a date string into YYYY-MM-DD. */
@@ -453,11 +477,12 @@ export default function TransactionsPage() {
 
       if (!date || amount === null) continue;
 
-      // Preserve sign exactly: negative = income (stored as negative cents), positive = expense
-      const amountCents = Math.round(amount * 100);
+      const description = merchant.trim();
+
+      // Resolve sign using Origin AI bank-statement convention
+      const amountCents = resolveAmountCents(amount, description);
 
       // Auto-categorize from description keywords; fall back to CSV-mapped category
-      const description = merchant.trim();
       const autoCategory = autoCategorize(description);
       const category = autoCategory ?? (resolveCategory(catRaw) as string);
 
