@@ -19,6 +19,8 @@ import { parseLocalDate } from "@/lib/dateUtils";
 import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, TrendingUp, ChevronUp, Check, Upload, FileText } from "lucide-react";
 import {
   USER_CATEGORIES,
+  ALL_CATEGORIES,
+  NON_BEHAVIORAL_CATEGORIES,
   INCOME_CATEGORIES,
   CATEGORY_COLORS,
   resolveCategory,
@@ -142,11 +144,37 @@ function csvDedupeBase(date: string, amountCents: number, merchant: string): str
   return `csv_${date}_${amountCents}_${merchant.toLowerCase().replace(/\s+/g, "_")}`;
 }
 
-/** Try to parse an amount string (handles negative = income, strips $, etc.). */
+/** Try to parse an amount string. Preserves sign — negative = income, positive = expense. */
 function parseAmount(raw: string): number | null {
   const cleaned = raw.replace(/[$,\s]/g, "");
   const n = parseFloat(cleaned);
   return isNaN(n) ? null : n;
+}
+
+const TRANSFER_KEYWORDS = [
+  "ONLINE TRANSFER TO", "ONLINE TRANSFER FROM",
+  "TRANSFER TO SAVINGS", "TRANSFER FROM SAVINGS",
+  "TRANSFER TO CHECKING", "TRANSFER FROM CHECKING",
+  "TRANSFER TO MONEY MARKET", "TRANSFER FROM MONEY MARKET",
+];
+const ATM_KEYWORDS = ["ATM WITHDRAWAL", "CITIBANK ATM", "ATM CASH", "ATM W/D"];
+const INCOME_KEYWORDS = [
+  "ZELLE CREDIT", "VENMO CREDIT", "CASH APP CREDIT",
+  "DIRECT DEPOSIT", "PAYROLL", "ACH CREDIT",
+];
+const PEER_PAYMENT_KEYWORDS = ["ZELLE PAYMENT", "VENMO PAYMENT", "CASH APP PAYMENT"];
+
+/**
+ * Auto-categorize a CSV row based on description keywords.
+ * Returns the override category, or null if the mapped CSV category should be used.
+ */
+function autoCategorize(description: string): string | null {
+  const upper = description.toUpperCase();
+  if (TRANSFER_KEYWORDS.some(k => upper.includes(k))) return "Internal Transfer";
+  if (ATM_KEYWORDS.some(k => upper.includes(k))) return "ATM Withdrawal";
+  if (INCOME_KEYWORDS.some(k => upper.includes(k))) return "Income";
+  if (PEER_PAYMENT_KEYWORDS.some(k => upper.includes(k))) return null; // keep CSV category
+  return null;
 }
 
 /** Try to parse a date string into YYYY-MM-DD. */
@@ -402,8 +430,8 @@ export default function TransactionsPage() {
 
   /** Build preview rows from the current mapping. Returns null if a required field is missing. */
   function buildPreviewRows(): { date: string; amountCents: number; merchant: string; category: string; notes: string }[] | null {
-    const dateCol    = Object.entries(csvMapping).find(([, v]) => v === "date")?.[0];
-    const amountCol  = Object.entries(csvMapping).find(([, v]) => v === "amount")?.[0];
+    const dateCol     = Object.entries(csvMapping).find(([, v]) => v === "date")?.[0];
+    const amountCol   = Object.entries(csvMapping).find(([, v]) => v === "amount")?.[0];
     const merchantCol = Object.entries(csvMapping).find(([, v]) => v === "merchant")?.[0];
 
     if (!dateCol || !amountCol) return null;
@@ -425,10 +453,15 @@ export default function TransactionsPage() {
 
       if (!date || amount === null) continue;
 
-      const amountCents = Math.round(Math.abs(amount) * 100);
-      const category = resolveCategory(catRaw) as string;
+      // Preserve sign exactly: negative = income (stored as negative cents), positive = expense
+      const amountCents = Math.round(amount * 100);
 
-      result.push({ date, amountCents, merchant: merchant.trim(), category, notes: notes.trim() });
+      // Auto-categorize from description keywords; fall back to CSV-mapped category
+      const description = merchant.trim();
+      const autoCategory = autoCategorize(description);
+      const category = autoCategory ?? (resolveCategory(catRaw) as string);
+
+      result.push({ date, amountCents, merchant: description, category, notes: notes.trim() });
     }
 
     return result;
@@ -449,15 +482,17 @@ export default function TransactionsPage() {
     // (e.g. two MTA swipes on the same day for the same amount) get distinct keys:
     // csv_2026-03-01_275_mta_1, csv_2026-03-01_275_mta_2, etc.
     // Re-importing the same CSV produces the same keys, so it stays idempotent.
+    // Dedup base uses absolute amount so sign differences don't create phantom uniqueness.
+    // Re-importing the same CSV produces identical keys → idempotent.
     const occurrences: Record<string, number> = {};
     const toUpsert = rows.map(r => {
-      const base = csvDedupeBase(r.date, r.amountCents, r.merchant);
+      const base = csvDedupeBase(r.date, Math.abs(r.amountCents), r.merchant);
       occurrences[base] = (occurrences[base] ?? 0) + 1;
       const key = `${base}_${occurrences[base]}`;
       return {
         user_id: userId,
         plaid_transaction_id: key,
-        amount_cents: r.amountCents,
+        amount_cents: r.amountCents,   // sign preserved: negative = income
         posted_at: r.date,
         merchant_name: r.merchant || null,
         description: r.merchant || "CSV import",
@@ -620,7 +655,7 @@ export default function TransactionsPage() {
               }}
               className={EDIT_INPUT_CLS}
             >
-              {USER_CATEGORIES.map(c => (
+              {ALL_CATEGORIES.map(c => (
                 <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>{c}</option>
               ))}
             </select>
@@ -983,7 +1018,7 @@ export default function TransactionsPage() {
               </div>
               <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none text-sm">
                 <option value="all">All categories</option>
-                {USER_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {ALL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <select value={dateRange} onChange={e => setDateRange(e.target.value as "7" | "30" | "90" | "all")} className="px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none text-sm">
                 <option value="7">7 days</option>
@@ -1024,7 +1059,7 @@ export default function TransactionsPage() {
                           className="text-xs px-2.5 py-1 rounded-full border cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/50 transition-colors"
                           style={{ backgroundColor: `${color}15`, borderColor: `${color}50`, color }}
                         >
-                          {USER_CATEGORIES.map(c => (
+                          {ALL_CATEGORIES.map(c => (
                             <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>{c}</option>
                           ))}
                         </select>

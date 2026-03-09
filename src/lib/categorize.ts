@@ -8,6 +8,19 @@ export const USER_CATEGORIES = [
   "Others",
 ] as const;
 
+/** Categories that appear in the DB but are never counted as behavioral spending. */
+export const NON_BEHAVIORAL_CATEGORIES = [
+  "Internal Transfer",
+  "ATM Withdrawal",
+  "Income",
+] as const;
+
+export type NonBehavioralCategory = (typeof NON_BEHAVIORAL_CATEGORIES)[number];
+
+/** Every valid category stored in the DB (user-editable + system). */
+export const ALL_CATEGORIES = [...USER_CATEGORIES, ...NON_BEHAVIORAL_CATEGORIES] as const;
+export type AnyCategory = (typeof ALL_CATEGORIES)[number];
+
 export const INCOME_CATEGORIES = [
   "Salary",
   "Allowance",
@@ -28,6 +41,9 @@ export const CATEGORY_COLORS: Record<string, string> = {
   "Essentials": "#22c55e",
   "Gifts": "#ef4444",
   "Others": "#71717a",
+  "Internal Transfer": "#3b82f6",
+  "ATM Withdrawal": "#a855f7",
+  "Income": "#10b981",
 };
 
 // Maps Plaid's personal_finance_category.primary values → our 7 categories
@@ -130,12 +146,16 @@ export function mapPlaidCategory(raw: string | null | undefined): UserCategory {
 }
 
 // Handles both stored custom categories and legacy Plaid raw strings
-export function resolveCategory(category: string | null | undefined): UserCategory {
+export function resolveCategory(category: string | null | undefined): AnyCategory {
   if (!category) return "Others";
-  if ((USER_CATEGORIES as readonly string[]).includes(category)) return category as UserCategory;
+  if ((ALL_CATEGORIES as readonly string[]).includes(category)) return category as AnyCategory;
   return mapPlaidCategory(category);
 }
 
 export function isUserCategory(cat: string | null | undefined): cat is UserCategory {
   return !!cat && (USER_CATEGORIES as readonly string[]).includes(cat);
+}
+
+export function isNonBehavioral(category: string | null | undefined): boolean {
+  return !!category && (NON_BEHAVIORAL_CATEGORIES as readonly string[]).includes(category);
 }

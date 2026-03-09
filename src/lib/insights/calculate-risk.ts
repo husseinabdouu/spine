@@ -11,6 +11,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { NON_BEHAVIORAL_CATEGORIES } from '@/lib/categorize';
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -67,22 +68,28 @@ export async function calculateBehavioralRisk(
 
   const { data: last7Tx } = await supabase
     .from('transactions')
-    .select('amount_cents, posted_at')
+    .select('amount_cents, posted_at, category')
     .eq('user_id', userId)
     .gte('posted_at', sevenDaysAgoStr)
     .lte('posted_at', targetDate);
 
   const { data: prev7Tx } = await supabase
     .from('transactions')
-    .select('amount_cents, posted_at')
+    .select('amount_cents, posted_at, category')
     .eq('user_id', userId)
     .gte('posted_at', fourteenDaysAgoStr)
     .lt('posted_at', sevenDaysAgoStr);
 
+  // Exclude non-behavioral categories (Internal Transfer, ATM Withdrawal, Income)
+  // and income rows (negative amount_cents) from spending trend calculations.
+  const nonBehavioral = NON_BEHAVIORAL_CATEGORIES as readonly string[];
+  const isBehavioralSpend = (t: { amount_cents: number; category?: string | null }) =>
+    t.amount_cents > 0 && !nonBehavioral.includes(t.category ?? "");
+
   const last7DaysSpend =
-    (last7Tx ?? []).reduce((sum, t) => sum + (t.amount_cents || 0), 0) / 100;
+    (last7Tx ?? []).filter(isBehavioralSpend).reduce((sum, t) => sum + (t.amount_cents || 0), 0) / 100;
   const prev7DaysSpend =
-    (prev7Tx ?? []).reduce((sum, t) => sum + (t.amount_cents || 0), 0) / 100;
+    (prev7Tx ?? []).filter(isBehavioralSpend).reduce((sum, t) => sum + (t.amount_cents || 0), 0) / 100;
 
   const spendingChangePercent =
     prev7DaysSpend > 0
