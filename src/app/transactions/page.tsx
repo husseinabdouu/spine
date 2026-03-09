@@ -701,7 +701,6 @@ export default function TransactionsPage() {
               type="number" min="0" step="0.01"
               value={edit.amount}
               onChange={e => updateEdit(t.id, { amount: e.target.value })}
-              onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
             />
           </div>
@@ -710,7 +709,6 @@ export default function TransactionsPage() {
             <input
               type="date" value={edit.date}
               onChange={e => updateEdit(t.id, { date: e.target.value })}
-              onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
             />
           </div>
@@ -719,7 +717,6 @@ export default function TransactionsPage() {
             <input
               type="time" value={edit.time}
               onChange={e => updateEdit(t.id, { time: e.target.value })}
-              onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
             />
           </div>
@@ -728,7 +725,6 @@ export default function TransactionsPage() {
             <input
               type="text" value={edit.merchant}
               onChange={e => updateEdit(t.id, { merchant: e.target.value })}
-              onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
               placeholder="Merchant name"
             />
@@ -737,11 +733,7 @@ export default function TransactionsPage() {
             <label className="text-xs text-[var(--text-muted)] mb-1 block">Category</label>
             <select
               value={edit.category}
-              onChange={e => {
-                const newCat = e.target.value;
-                updateEdit(t.id, { category: newCat });
-                saveField(t.id, { category: newCat });
-              }}
+              onChange={e => updateEdit(t.id, { category: e.target.value })}
               className={EDIT_INPUT_CLS}
             >
               {ALL_CATEGORIES.map(c => (
@@ -754,23 +746,18 @@ export default function TransactionsPage() {
             <textarea
               value={edit.notes}
               onChange={e => updateEdit(t.id, { notes: e.target.value })}
-              onBlur={() => saveField(t.id)}
               rows={2}
               placeholder="Add a note..."
               className={`${EDIT_INPUT_CLS} resize-none`}
             />
           </div>
-          <div className="sm:col-span-2 flex items-center justify-between">
+          <div className="sm:col-span-2">
             <label className="flex items-center gap-2.5 cursor-pointer select-none">
               <div className="relative">
                 <input
                   type="checkbox"
                   checked={edit.is_necessary_expense}
-                  onChange={e => {
-                    const checked = e.target.checked;
-                    updateEdit(t.id, { is_necessary_expense: checked });
-                    saveField(t.id, { is_necessary_expense: checked });
-                  }}
+                  onChange={e => updateEdit(t.id, { is_necessary_expense: e.target.checked })}
                   className="sr-only peer"
                 />
                 <div className="w-9 h-5 rounded-full border border-[var(--glass-border)] bg-[rgba(255,255,255,0.06)] peer-checked:bg-[var(--gold)] transition-colors" />
@@ -778,19 +765,27 @@ export default function TransactionsPage() {
               </div>
               <span className="text-xs text-[var(--text-dim)]">Necessary expense</span>
             </label>
-            <div className={`flex items-center gap-1.5 text-xs font-medium transition-all duration-300 ${isSaved ? "opacity-100 text-[var(--safe)]" : "opacity-0"}`}>
-              <Check className="w-3.5 h-3.5" />
-              Saved
-            </div>
           </div>
         </div>
-        <button
-          onClick={() => setExpandedId(null)}
-          className="mt-3 flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-dim)] transition-colors"
-        >
-          <ChevronUp className="w-3.5 h-3.5" />
-          Collapse
-        </button>
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            onClick={() => saveField(t.id)}
+            className="flex-1 py-2 bg-[var(--gold)] hover:opacity-90 text-[#080808] rounded-xl text-sm font-bold transition-opacity"
+          >
+            {isSaved ? (
+              <span className="flex items-center justify-center gap-1.5">
+                <Check className="w-3.5 h-3.5" /> Saved
+              </span>
+            ) : "Save changes"}
+          </button>
+          <button
+            onClick={() => setExpandedId(null)}
+            className="flex items-center gap-1.5 px-4 py-2 border border-[var(--glass-border)] rounded-xl text-xs text-[var(--text-muted)] hover:text-[var(--text-dim)] transition-colors"
+          >
+            <ChevronUp className="w-3.5 h-3.5" />
+            Collapse
+          </button>
+        </div>
       </div>
     );
   }
@@ -982,7 +977,7 @@ export default function TransactionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6 -mt-2">
         <p className="text-[var(--text-dim)] text-sm">
-          {billableSpending.length.toLocaleString()} expenses · {income.length.toLocaleString()} income
+          {transactions.length.toLocaleString()} total · {billableSpending.length.toLocaleString()} expenses · {income.length.toLocaleString()} income · {(transactions.length - billableSpending.length - income.length).toLocaleString()} excluded (transfers/ATM)
           {dateRange !== "all" && <span className="text-[var(--text-muted)]"> (last {dateRange} days)</span>}
         </p>
         <div className="flex items-center gap-2">
