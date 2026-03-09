@@ -180,20 +180,20 @@ function autoCategorize(description: string): string | null {
 /**
  * Determine the correct sign for amount_cents for a CSV row from Origin AI / bank exports.
  *
- * Origin AI exports ALL transactions as negative numbers in bank statement format.
- * Rule: if the resolved category is "Income" → store as negative (income convention).
- *       Everything else (expenses, transfers, ATM) → store as positive.
+ * Origin AI exports ALL values as negative numbers regardless of type.
+ * Sign is determined ONLY by the auto-categorized category (keyword matching),
+ * never by the raw CSV amount sign or the CSV category column value.
  *
- * Returns the signed amount_cents ready to store in the DB.
+ * Rule:
+ *   category === "Income"  → store as negative amount_cents (money in)
+ *   everything else        → Math.abs → store as positive amount_cents (money out)
  */
-function resolveAmountCents(rawAmount: number, resolvedCategory: string): number {
-  const absAmount = Math.abs(rawAmount);
-  if (resolvedCategory === "Income") {
-    // Income → negative amount_cents
-    return -Math.round(absAmount * 100);
+function resolveAmountCents(rawAmount: number, autoCategory: string | null): number {
+  if (autoCategory === "Income") {
+    return -Math.round(Math.abs(rawAmount) * 100);
   }
-  // All other categories (expenses, Internal Transfer, ATM Withdrawal) → positive
-  return Math.round(absAmount * 100);
+  // Internal Transfer, ATM Withdrawal, all expense categories, Others → positive
+  return Math.round(Math.abs(rawAmount) * 100);
 }
 
 /** Try to parse a date string into YYYY-MM-DD. */
@@ -474,12 +474,17 @@ export default function TransactionsPage() {
 
       const description = merchant.trim();
 
-      // Auto-categorize first (needed to determine sign)
+      // Keyword-based category takes full precedence for both sign and category label.
+      // The CSV category column is only used as a fallback when keywords don't match,
+      // and it NEVER affects sign — only autoCategorize does.
       const autoCategory = autoCategorize(description);
-      const category = autoCategory ?? (resolveCategory(catRaw) as string);
+      const csvCategory  = catRaw.trim() || "Others";
+      const category     = autoCategory ?? csvCategory;
 
-      // Resolve sign: Income → negative, everything else → positive
-      const amountCents = resolveAmountCents(amount, category);
+      // Sign determined solely by autoCategory keyword result:
+      //   Income keyword → negative (money in)
+      //   Everything else → positive Math.abs (money out / neutral)
+      const amountCents = resolveAmountCents(amount, autoCategory);
 
       result.push({ date, amountCents, merchant: description, category, notes: notes.trim() });
     }
