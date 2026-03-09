@@ -16,7 +16,7 @@ import {
 import { Bar, Doughnut } from "react-chartjs-2";
 import { format, subDays } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
-import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, TrendingUp, ChevronUp, Check } from "lucide-react";
+import { CreditCard, Plus, X, Search, ArrowDownLeft, ArrowUpRight, TrendingUp, ChevronUp, Check, Upload, FileText } from "lucide-react";
 import {
   USER_CATEGORIES,
   INCOME_CATEGORIES,
@@ -56,6 +56,13 @@ type AddForm = {
   category: string;
 };
 
+// CSV import types
+type CsvRow = Record<string, string>;
+type CsvField = "date" | "amount" | "merchant" | "category" | "notes" | "(ignore)";
+const CSV_FIELDS: CsvField[] = ["date", "amount", "merchant", "category", "notes", "(ignore)"];
+
+type CsvImportStep = "idle" | "map" | "preview" | "importing" | "done";
+
 const INPUT_CLS =
   "w-full px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--gold)]/50 text-sm";
 
@@ -80,6 +87,78 @@ function toEditState(t: Transaction): EditState {
     notes: t.notes || "",
     is_necessary_expense: t.is_necessary_expense ?? false,
   };
+}
+
+/** Naive CSV parser — handles quoted fields with commas inside. */
+function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim().split("\n");
+  if (lines.length < 2) return { headers: [], rows: [] };
+
+  function splitLine(line: string): string[] {
+    const result: string[] = [];
+    let cur = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuote && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuote = !inQuote;
+      } else if (ch === "," && !inQuote) {
+        result.push(cur.trim());
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur.trim());
+    return result;
+  }
+
+  const headers = splitLine(lines[0]);
+  const rows = lines.slice(1).filter(l => l.trim()).map(l => {
+    const vals = splitLine(l);
+    const obj: CsvRow = {};
+    headers.forEach((h, i) => { obj[h] = vals[i] ?? ""; });
+    return obj;
+  });
+  return { headers, rows };
+}
+
+/** Guess the best Spine field for a CSV column header. */
+function guessMapping(header: string): CsvField {
+  const h = header.toLowerCase();
+  if (/date|posted|time/.test(h)) return "date";
+  if (/amount|price|cost|total|sum/.test(h)) return "amount";
+  if (/merchant|vendor|payee|name|description|desc/.test(h)) return "merchant";
+  if (/cat(egory)?/.test(h)) return "category";
+  if (/note|memo|comment/.test(h)) return "notes";
+  return "(ignore)";
+}
+
+/** Deterministic dedup key: date + amount-cents + merchant (lowercased). */
+function csvDedupeKey(date: string, amountCents: number, merchant: string): string {
+  return `csv_${date}_${amountCents}_${merchant.toLowerCase().replace(/\s+/g, "_")}`;
+}
+
+/** Try to parse an amount string (handles negative = income, strips $, etc.). */
+function parseAmount(raw: string): number | null {
+  const cleaned = raw.replace(/[$,\s]/g, "");
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+
+/** Try to parse a date string into YYYY-MM-DD. */
+function parseDate(raw: string): string | null {
+  if (!raw) return null;
+  // Already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  // MM/DD/YYYY or MM-DD-YYYY
+  const mdy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
+  // Try native Date parse as last resort
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) return format(d, "yyyy-MM-dd");
+  return null;
 }
 
 export default function TransactionsPage() {
@@ -107,6 +186,15 @@ export default function TransactionsPage() {
   const [editStates, setEditStates] = useState<Record<string, EditState>>({});
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const savedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // CSV import state
+  const [csvStep, setCsvStep] = useState<CsvImportStep>("idle");
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
+  const [csvMapping, setCsvMapping] = useState<Record<string, CsvField>>({});
+  const [csvImportCount, setCsvImportCount] = useState(0);
+  const [csvImportError, setCsvImportError] = useState<string | null>(null);
+  const csvFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     checkAuth();
@@ -183,7 +271,6 @@ export default function TransactionsPage() {
 
     const newCents = Math.round(amountVal * 100);
 
-    // Build posted_at_timestamp from date + time
     let newTimestamp: string | null = null;
     if (edit.date) {
       const [h, m] = edit.time.split(":").map(Number);
@@ -263,6 +350,125 @@ export default function TransactionsPage() {
     setSaving(false);
   }
 
+  // ── CSV Import ────────────────────────────────────────────────────────────
+
+  function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target?.result as string;
+      const { headers, rows } = parseCsv(text);
+      if (!headers.length || !rows.length) {
+        alert("Could not parse this CSV. Make sure it has a header row and data rows.");
+        return;
+      }
+      const initialMapping: Record<string, CsvField> = {};
+      headers.forEach(h => { initialMapping[h] = guessMapping(h); });
+      setCsvHeaders(headers);
+      setCsvRows(rows);
+      setCsvMapping(initialMapping);
+      setCsvStep("map");
+      setCsvImportError(null);
+    };
+    reader.readAsText(file);
+    // reset so the same file can be re-selected
+    e.target.value = "";
+  }
+
+  function closeCsvModal() {
+    setCsvStep("idle");
+    setCsvHeaders([]);
+    setCsvRows([]);
+    setCsvMapping({});
+    setCsvImportError(null);
+  }
+
+  /** Build preview rows from the current mapping. Returns null if a required field is missing. */
+  function buildPreviewRows(): { date: string; amountCents: number; merchant: string; category: string; notes: string }[] | null {
+    const dateCol    = Object.entries(csvMapping).find(([, v]) => v === "date")?.[0];
+    const amountCol  = Object.entries(csvMapping).find(([, v]) => v === "amount")?.[0];
+    const merchantCol = Object.entries(csvMapping).find(([, v]) => v === "merchant")?.[0];
+
+    if (!dateCol || !amountCol) return null;
+
+    const categoryCol = Object.entries(csvMapping).find(([, v]) => v === "category")?.[0];
+    const notesCol    = Object.entries(csvMapping).find(([, v]) => v === "notes")?.[0];
+
+    const result: { date: string; amountCents: number; merchant: string; category: string; notes: string }[] = [];
+
+    for (const row of csvRows) {
+      const rawDate   = row[dateCol] ?? "";
+      const rawAmount = row[amountCol] ?? "";
+      const merchant  = merchantCol ? (row[merchantCol] ?? "") : "";
+      const catRaw    = categoryCol ? (row[categoryCol] ?? "") : "";
+      const notes     = notesCol    ? (row[notesCol]    ?? "") : "";
+
+      const date = parseDate(rawDate);
+      const amount = parseAmount(rawAmount);
+
+      if (!date || amount === null) continue;
+
+      const amountCents = Math.round(Math.abs(amount) * 100);
+      const category = resolveCategory(catRaw) as string;
+
+      result.push({ date, amountCents, merchant: merchant.trim(), category, notes: notes.trim() });
+    }
+
+    return result;
+  }
+
+  async function runCsvImport() {
+    if (!userId) return;
+    const rows = buildPreviewRows();
+    if (!rows || rows.length === 0) {
+      setCsvImportError("No valid rows to import. Check your column mapping.");
+      return;
+    }
+
+    setCsvStep("importing");
+    setCsvImportError(null);
+
+    const toUpsert = rows.map(r => ({
+      user_id: userId,
+      plaid_transaction_id: csvDedupeKey(r.date, r.amountCents, r.merchant),
+      amount_cents: r.amountCents,
+      posted_at: r.date,
+      merchant_name: r.merchant || null,
+      description: r.merchant || "CSV import",
+      category: r.category || "Others",
+      notes: r.notes || null,
+    }));
+
+    // Batch in chunks of 200 to stay within Supabase limits
+    const CHUNK = 200;
+    let totalImported = 0;
+    for (let i = 0; i < toUpsert.length; i += CHUNK) {
+      const chunk = toUpsert.slice(i, i + CHUNK);
+      const { error } = await supabase
+        .from("transactions")
+        .upsert(chunk, { onConflict: "plaid_transaction_id", ignoreDuplicates: true });
+      if (error) {
+        setCsvImportError(`Import failed: ${error.message}`);
+        setCsvStep("preview");
+        return;
+      }
+      totalImported += chunk.length;
+    }
+
+    setCsvImportCount(totalImported);
+    setCsvStep("done");
+    loadTransactions();
+  }
+
+  const previewRows = useMemo(() => {
+    if (csvStep !== "preview" && csvStep !== "map") return null;
+    return buildPreviewRows();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvStep, csvMapping, csvRows]);
+
+  // ── Data derivations ──────────────────────────────────────────────────────
+
   const spending = useMemo(() => transactions.filter(t => t.amount_cents > 0), [transactions]);
   const income = useMemo(() => transactions.filter(t => t.amount_cents <= 0), [transactions]);
 
@@ -329,6 +535,8 @@ export default function TransactionsPage() {
 
   function getName(t: Transaction) { return t.merchant_name || t.description || "Unknown"; }
 
+  // ── Render helpers ────────────────────────────────────────────────────────
+
   function renderExpandedEdit(t: Transaction) {
     const edit = editStates[t.id];
     if (!edit) return null;
@@ -337,58 +545,44 @@ export default function TransactionsPage() {
     return (
       <div className="px-4 pb-4 bg-[rgba(255,255,255,0.025)] border-t border-[var(--glass-border)]">
         <div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {/* Amount */}
           <div>
             <label className="text-xs text-[var(--text-muted)] mb-1 block">Amount ($)</label>
             <input
-              type="number"
-              min="0"
-              step="0.01"
+              type="number" min="0" step="0.01"
               value={edit.amount}
               onChange={e => updateEdit(t.id, { amount: e.target.value })}
               onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
             />
           </div>
-
-          {/* Date */}
           <div>
             <label className="text-xs text-[var(--text-muted)] mb-1 block">Date</label>
             <input
-              type="date"
-              value={edit.date}
+              type="date" value={edit.date}
               onChange={e => updateEdit(t.id, { date: e.target.value })}
               onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
             />
           </div>
-
-          {/* Time */}
           <div>
             <label className="text-xs text-[var(--text-muted)] mb-1 block">Time</label>
             <input
-              type="time"
-              value={edit.time}
+              type="time" value={edit.time}
               onChange={e => updateEdit(t.id, { time: e.target.value })}
               onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
             />
           </div>
-
-          {/* Merchant */}
           <div>
             <label className="text-xs text-[var(--text-muted)] mb-1 block">Merchant</label>
             <input
-              type="text"
-              value={edit.merchant}
+              type="text" value={edit.merchant}
               onChange={e => updateEdit(t.id, { merchant: e.target.value })}
               onBlur={() => saveField(t.id)}
               className={EDIT_INPUT_CLS}
               placeholder="Merchant name"
             />
           </div>
-
-          {/* Category */}
           <div>
             <label className="text-xs text-[var(--text-muted)] mb-1 block">Category</label>
             <select
@@ -405,8 +599,6 @@ export default function TransactionsPage() {
               ))}
             </select>
           </div>
-
-          {/* Notes — full width */}
           <div className="sm:col-span-2">
             <label className="text-xs text-[var(--text-muted)] mb-1 block">Notes</label>
             <textarea
@@ -418,8 +610,6 @@ export default function TransactionsPage() {
               className={`${EDIT_INPUT_CLS} resize-none`}
             />
           </div>
-
-          {/* Necessary expense + saved indicator */}
           <div className="sm:col-span-2 flex items-center justify-between">
             <label className="flex items-center gap-2.5 cursor-pointer select-none">
               <div className="relative">
@@ -438,15 +628,12 @@ export default function TransactionsPage() {
               </div>
               <span className="text-xs text-[var(--text-dim)]">Necessary expense</span>
             </label>
-
             <div className={`flex items-center gap-1.5 text-xs font-medium transition-all duration-300 ${isSaved ? "opacity-100 text-[var(--safe)]" : "opacity-0"}`}>
               <Check className="w-3.5 h-3.5" />
               Saved
             </div>
           </div>
         </div>
-
-        {/* Collapse */}
         <button
           onClick={() => setExpandedId(null)}
           className="mt-3 flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-dim)] transition-colors"
@@ -458,8 +645,189 @@ export default function TransactionsPage() {
     );
   }
 
+  function renderCsvModal() {
+    if (csvStep === "idle") return null;
+
+    return (
+      <div
+        className="fixed inset-0 bg-[var(--modal-overlay)] backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        onClick={e => e.target === e.currentTarget && csvStep !== "importing" && closeCsvModal()}
+      >
+        <div className="bg-[var(--modal-bg)] border border-[var(--glass-border)] rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
+
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 pb-4 border-b border-[var(--glass-border)]">
+            <div className="flex items-center gap-3">
+              <FileText className="w-5 h-5 text-[var(--gold)]" />
+              <h2 className="text-lg font-semibold text-[var(--text-strong)]">
+                {csvStep === "map" && "Map CSV columns"}
+                {csvStep === "preview" && "Preview import"}
+                {csvStep === "importing" && "Importing…"}
+                {csvStep === "done" && "Import complete"}
+              </h2>
+            </div>
+            {csvStep !== "importing" && (
+              <button onClick={closeCsvModal} className="text-[var(--text-dim)] hover:text-[var(--text-strong)] transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          <div className="overflow-y-auto flex-1 p-6">
+
+            {/* Step: map */}
+            {csvStep === "map" && (
+              <div className="space-y-4">
+                <p className="text-sm text-[var(--text-dim)]">
+                  Match each column in your CSV to a Spine field. At minimum, <span className="text-[var(--text)]">date</span> and <span className="text-[var(--text)]">amount</span> are required.
+                </p>
+                <div className="space-y-2">
+                  {csvHeaders.map(h => (
+                    <div key={h} className="flex items-center gap-4">
+                      <div className="w-48 shrink-0 text-sm text-[var(--text)] font-mono truncate" title={h}>{h}</div>
+                      <select
+                        value={csvMapping[h] ?? "(ignore)"}
+                        onChange={e => setCsvMapping(prev => ({ ...prev, [h]: e.target.value as CsvField }))}
+                        className="flex-1 px-2.5 py-1.5 bg-[rgba(255,255,255,0.06)] border border-[var(--glass-border)] rounded-md text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/60 text-sm"
+                      >
+                        {CSV_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <div className="w-40 shrink-0 text-xs text-[var(--text-muted)] truncate font-mono" title={csvRows[0]?.[h]}>
+                        {csvRows[0]?.[h] ?? ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step: preview */}
+            {csvStep === "preview" && (
+              <div className="space-y-4">
+                <p className="text-sm text-[var(--text-dim)]">
+                  First 5 rows that will be imported ({previewRows?.length ?? 0} total valid rows detected).
+                  Duplicates are automatically skipped using date + amount + merchant as the dedup key.
+                </p>
+                {previewRows && previewRows.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-[var(--glass-border)] text-[var(--text-muted)]">
+                          <th className="text-left py-2 pr-3 font-medium">Date</th>
+                          <th className="text-right py-2 pr-3 font-medium">Amount</th>
+                          <th className="text-left py-2 pr-3 font-medium">Merchant</th>
+                          <th className="text-left py-2 pr-3 font-medium">Category</th>
+                          <th className="text-left py-2 font-medium">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--glass-border)]">
+                        {previewRows.slice(0, 5).map((r, i) => (
+                          <tr key={i} className="text-[var(--text-dim)]">
+                            <td className="py-2 pr-3">{r.date}</td>
+                            <td className="py-2 pr-3 text-right tabular-nums">${(r.amountCents / 100).toFixed(2)}</td>
+                            <td className="py-2 pr-3 truncate max-w-[120px]">{r.merchant || "—"}</td>
+                            <td className="py-2 pr-3">{r.category}</td>
+                            <td className="py-2 truncate max-w-[100px]">{r.notes || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {previewRows.length > 5 && (
+                      <p className="text-xs text-[var(--text-muted)] mt-2">…and {previewRows.length - 5} more rows</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-[var(--danger)]">No valid rows found. Go back and check your column mapping — date and amount are required.</p>
+                )}
+                {csvImportError && (
+                  <p className="text-sm text-[var(--danger)] bg-[var(--danger-dim)] border border-[var(--danger)]/20 rounded-lg px-3 py-2">{csvImportError}</p>
+                )}
+              </div>
+            )}
+
+            {/* Step: importing */}
+            {csvStep === "importing" && (
+              <div className="flex flex-col items-center justify-center py-12 gap-4">
+                <div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-[var(--text-dim)]">Importing transactions…</p>
+              </div>
+            )}
+
+            {/* Step: done */}
+            {csvStep === "done" && (
+              <div className="flex flex-col items-center justify-center py-12 gap-4 text-center">
+                <div className="w-12 h-12 rounded-full bg-[var(--safe-dim)] flex items-center justify-center">
+                  <Check className="w-6 h-6 text-[var(--safe)]" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold text-[var(--text-strong)]">{csvImportCount} transactions imported</p>
+                  <p className="text-sm text-[var(--text-dim)] mt-1">Duplicates were automatically skipped.</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer actions */}
+          <div className="p-6 pt-4 border-t border-[var(--glass-border)] flex gap-3 justify-end">
+            {csvStep === "map" && (
+              <>
+                <button onClick={closeCsvModal} className="px-4 py-2 border border-[var(--glass-border)] rounded-xl text-[var(--text-dim)] hover:text-[var(--text-strong)] text-sm transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const hasDate = Object.values(csvMapping).includes("date");
+                    const hasAmount = Object.values(csvMapping).includes("amount");
+                    if (!hasDate || !hasAmount) {
+                      alert("You must map at least a date and an amount column.");
+                      return;
+                    }
+                    setCsvStep("preview");
+                  }}
+                  className="px-5 py-2 bg-[var(--gold)] hover:opacity-90 text-[#080808] rounded-xl text-sm font-bold transition-opacity"
+                >
+                  Preview →
+                </button>
+              </>
+            )}
+            {csvStep === "preview" && (
+              <>
+                <button onClick={() => setCsvStep("map")} className="px-4 py-2 border border-[var(--glass-border)] rounded-xl text-[var(--text-dim)] hover:text-[var(--text-strong)] text-sm transition-colors">
+                  ← Back
+                </button>
+                <button
+                  onClick={runCsvImport}
+                  disabled={!previewRows || previewRows.length === 0}
+                  className="px-5 py-2 bg-[var(--gold)] hover:opacity-90 disabled:opacity-50 text-[#080808] rounded-xl text-sm font-bold transition-opacity"
+                >
+                  Import {previewRows?.length ?? 0} rows
+                </button>
+              </>
+            )}
+            {csvStep === "done" && (
+              <button onClick={closeCsvModal} className="px-5 py-2 bg-[var(--gold)] hover:opacity-90 text-[#080808] rounded-xl text-sm font-bold transition-opacity">
+                Done
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main render ───────────────────────────────────────────────────────────
+
   return (
     <AppShell title="Transactions" userEmail={userEmail} onLogout={logout}>
+
+      {/* Hidden CSV file input */}
+      <input
+        ref={csvFileRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={handleCsvFile}
+      />
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6 -mt-2">
@@ -467,12 +835,20 @@ export default function TransactionsPage() {
           {spending.length.toLocaleString()} expenses · {income.length.toLocaleString()} income
           {dateRange !== "all" && <span className="text-[var(--text-muted)]"> (last {dateRange} days)</span>}
         </p>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-[var(--gold)] hover:opacity-90 text-[#080808] rounded-lg text-sm font-bold transition-opacity"
-        >
-          <Plus className="w-4 h-4" /> Add Transaction
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => csvFileRef.current?.click()}
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--glass-hover-subtle)] border border-[var(--glass-border)] text-[var(--text-dim)] hover:text-[var(--text)] rounded-lg text-sm font-medium transition-all"
+          >
+            <Upload className="w-4 h-4" /> Import CSV
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--gold)] hover:opacity-90 text-[#080808] rounded-lg text-sm font-bold transition-opacity"
+          >
+            <Plus className="w-4 h-4" /> Add Transaction
+          </button>
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -601,7 +977,6 @@ export default function TransactionsPage() {
                 const isExpanded = expandedId === t.id;
                 return (
                   <div key={t.id} className={`transition-colors ${isExpanded ? "bg-[rgba(255,255,255,0.03)]" : ""}`}>
-                    {/* Row */}
                     <div
                       className="flex items-center justify-between px-4 py-3 hover:bg-[var(--glass-hover-subtle)] transition-colors cursor-pointer"
                       onClick={() => toggleExpand(t)}
@@ -616,7 +991,6 @@ export default function TransactionsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-4 shrink-0 ml-4">
-                        {/* Inline category pill — stop propagation so click doesn't toggle expand */}
                         <select
                           value={cat}
                           onChange={e => { e.stopPropagation(); updateCategory(t.id, e.target.value); }}
@@ -636,8 +1010,6 @@ export default function TransactionsPage() {
                         />
                       </div>
                     </div>
-
-                    {/* Expanded edit panel */}
                     {isExpanded && renderExpandedEdit(t)}
                   </div>
                 );
@@ -646,7 +1018,6 @@ export default function TransactionsPage() {
           </div>
         </>
       ) : (
-        /* Income tab */
         <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl overflow-hidden backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
           {filteredIncome.length === 0 ? (
             <div className="p-12 text-center text-[var(--text-muted)]">No income entries found.</div>
@@ -689,7 +1060,6 @@ export default function TransactionsPage() {
               </button>
             </div>
 
-            {/* Expense / Income toggle */}
             <div className="flex gap-2 mb-5 p-1 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
               <button
                 onClick={() => setAddForm(f => ({ ...f, type: "expense", category: "Food & Drink" }))}
@@ -745,6 +1115,9 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      {/* CSV Import Modal */}
+      {renderCsvModal()}
     </AppShell>
   );
 }

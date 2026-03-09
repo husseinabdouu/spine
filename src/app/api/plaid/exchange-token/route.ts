@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { plaidClient } from '@/lib/plaid/client';
 import { createClient } from '@/lib/supabase/server';
 import { CountryCode } from 'plaid';
-import { backfillTransactions, initCursor } from '@/lib/plaid/backfill';
-import { format, subMonths } from 'date-fns';
+import { mapPlaidCategory } from '@/lib/categorize';
 
 export async function POST(request: Request) {
   try {
@@ -37,7 +36,6 @@ export async function POST(request: Request) {
         });
         institutionName = institutionResponse.data.institution.name;
       } catch {
-        // institutionsGetById can fail for some production institutions; fall back to generic name
         institutionName = 'Connected Bank';
       }
     }
@@ -58,30 +56,69 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to save bank connection' }, { status: 500 });
     }
 
-    // --- Historical backfill (24 months) + cursor initialisation ---
-    // Runs synchronously so the user's full history is ready immediately after connect.
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const twoYearsAgo = format(subMonths(new Date(), 24), 'yyyy-MM-dd');
-
-    console.log(`[exchange-token] Starting 24-month backfill for ${institutionName} (${twoYearsAgo} → ${today})`);
+    // --- Full history pull using transactionsSync from null cursor ---
+    // Using transactionsSync (not transactionsGet) ensures Plaid generates the same
+    // transaction_id strings as future incremental syncs — mixing both APIs creates
+    // duplicate rows because they generate different IDs for the same transaction.
+    // Starting from a null cursor returns ALL available history with no date cap.
+    console.log(`[exchange-token] Starting full-history sync for ${institutionName}`);
 
     try {
-      const { transactions_added } = await backfillTransactions(
-        supabase,
-        accessToken,
-        user_id,
-        twoYearsAgo,
-        today,
-      );
-      console.log(`[exchange-token] Backfill complete: ${transactions_added} transactions`);
+      let cursor: string | undefined = undefined;
+      let hasMore = true;
+      let totalAdded = 0;
 
-      // Initialise the sync cursor so future incremental syncs only fetch deltas
-      await initCursor(supabase, accessToken, user_id, insertedItem.id);
-      console.log(`[exchange-token] Cursor initialised for item ${insertedItem.id}`);
-    } catch (backfillError) {
-      // Non-fatal: the bank is connected even if backfill partially fails.
-      // The user can re-sync manually or hit /api/plaid/backfill again.
-      console.error('[exchange-token] Backfill error (non-fatal):', backfillError);
+      while (hasMore) {
+        const { data: syncData } = await plaidClient.transactionsSync({
+          access_token: accessToken,
+          cursor,
+          options: { include_personal_finance_category: true },
+        });
+
+        const { added, next_cursor } = syncData;
+
+        if (added.length > 0) {
+          const rows = added.map(tx => ({
+            user_id,
+            plaid_transaction_id: tx.transaction_id,
+            amount_cents: Math.round(tx.amount * 100),
+            posted_at: tx.authorized_date || tx.date,
+            merchant_name: tx.merchant_name || tx.name || null,
+            description: tx.name || tx.merchant_name || 'Unknown',
+            category: mapPlaidCategory(
+              tx.personal_finance_category?.primary ||
+              (Array.isArray(tx.category) ? tx.category[0] : null)
+            ),
+          }));
+
+          const { error: upsertErr } = await supabase
+            .from('transactions')
+            .upsert(rows, { onConflict: 'plaid_transaction_id', ignoreDuplicates: true });
+
+          if (upsertErr) {
+            console.error('[exchange-token] Upsert error:', upsertErr);
+          } else {
+            totalAdded += added.length;
+          }
+        }
+
+        cursor = next_cursor;
+        hasMore = syncData.has_more;
+      }
+
+      // Store the final cursor so future incremental syncs only fetch deltas
+      if (cursor) {
+        await supabase
+          .from('plaid_items')
+          .update({ cursor })
+          .eq('id', insertedItem.id);
+      }
+
+      console.log(`[exchange-token] Full-history sync complete: ${totalAdded} transactions, cursor stored`);
+    } catch (syncError) {
+      // Non-fatal: bank is connected even if the initial pull partially fails.
+      // User can re-sync via Settings → Backfill.
+      console.error('[exchange-token] Sync error (non-fatal):', syncError);
     }
 
     return NextResponse.json({
