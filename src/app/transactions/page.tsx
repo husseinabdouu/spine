@@ -180,25 +180,20 @@ function autoCategorize(description: string): string | null {
 /**
  * Determine the correct sign for amount_cents for a CSV row from Origin AI / bank exports.
  *
- * Origin AI exports ALL transactions as negative numbers in bank statement format:
- *   - Negative in CSV + income keyword  → store as negative (income)
- *   - Negative in CSV + regular expense → flip to positive (expense)
- *   - Positive in CSV                   → already income convention, store as negative
+ * Origin AI exports ALL transactions as negative numbers in bank statement format.
+ * Rule: if the resolved category is "Income" → store as negative (income convention).
+ *       Everything else (expenses, transfers, ATM) → store as positive.
  *
  * Returns the signed amount_cents ready to store in the DB.
  */
-function resolveAmountCents(rawAmount: number, description: string): number {
-  const isIncomeByKeyword =
-    INCOME_KEYWORDS.some(k => description.toUpperCase().includes(k.toUpperCase()));
-
-  if (rawAmount < 0) {
-    // Bank statement format: negative = money out (expense) OR income keyword
-    if (isIncomeByKeyword) return Math.round(rawAmount * 100); // keep negative → income
-    return Math.round(-rawAmount * 100); // flip → positive → expense
-  } else {
-    // Positive raw amount = money coming in → store as negative (income convention)
-    return Math.round(-rawAmount * 100);
+function resolveAmountCents(rawAmount: number, resolvedCategory: string): number {
+  const absAmount = Math.abs(rawAmount);
+  if (resolvedCategory === "Income") {
+    // Income → negative amount_cents
+    return -Math.round(absAmount * 100);
   }
+  // All other categories (expenses, Internal Transfer, ATM Withdrawal) → positive
+  return Math.round(absAmount * 100);
 }
 
 /** Try to parse a date string into YYYY-MM-DD. */
@@ -479,12 +474,12 @@ export default function TransactionsPage() {
 
       const description = merchant.trim();
 
-      // Resolve sign using Origin AI bank-statement convention
-      const amountCents = resolveAmountCents(amount, description);
-
-      // Auto-categorize from description keywords; fall back to CSV-mapped category
+      // Auto-categorize first (needed to determine sign)
       const autoCategory = autoCategorize(description);
       const category = autoCategory ?? (resolveCategory(catRaw) as string);
+
+      // Resolve sign: Income → negative, everything else → positive
+      const amountCents = resolveAmountCents(amount, category);
 
       result.push({ date, amountCents, merchant: description, category, notes: notes.trim() });
     }
@@ -502,6 +497,16 @@ export default function TransactionsPage() {
 
     setCsvStep("importing");
     setCsvImportError(null);
+
+    // Debug: log first 5 parsed rows to verify signs before inserting
+    console.log("[CSV Import] First 5 parsed rows:", rows.slice(0, 5).map(r => ({
+      date: r.date,
+      merchant: r.merchant,
+      category: r.category,
+      rawAmountCents: r.amountCents,
+      dollars: (r.amountCents / 100).toFixed(2),
+      sign: r.amountCents > 0 ? "EXPENSE (+)" : "INCOME (−)",
+    })));
 
     // Build per-row dedup keys with a sequence suffix so repeated transactions
     // (e.g. two MTA swipes on the same day for the same amount) get distinct keys:
@@ -583,19 +588,27 @@ export default function TransactionsPage() {
     );
   }, [income, search]);
 
+  // Exclude non-behavioral categories from charts and totals (but keep them in the list)
+  const CHART_EXCLUDE_CATS = new Set(["Internal Transfer", "ATM Withdrawal"]);
+  const billableSpending = useMemo(
+    () => filteredSpending.filter(t => !CHART_EXCLUDE_CATS.has(resolveCategory(t.category))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredSpending]
+  );
+
   const categoryData = useMemo(() => {
     const byCat: Record<string, number> = {};
-    filteredSpending.forEach(t => {
+    billableSpending.forEach(t => {
       const cat = resolveCategory(t.category);
       byCat[cat] = (byCat[cat] || 0) + t.amount_cents / 100;
     });
     return Object.entries(byCat).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [filteredSpending]);
+  }, [billableSpending]);
 
   const chartData = useMemo(() => {
     if (dateRange === "all") {
       const byMonth: Record<string, number> = {};
-      filteredSpending.forEach(t => {
+      billableSpending.forEach(t => {
         const month = String(t.posted_at).slice(0, 7);
         byMonth[month] = (byMonth[month] || 0) + t.amount_cents / 100;
       });
@@ -604,7 +617,7 @@ export default function TransactionsPage() {
         .map(m => ({ label: format(parseLocalDate(m + "-01"), "MMM yy"), spend: byMonth[m] }));
     }
     const byDay: Record<string, number> = {};
-    filteredSpending.forEach(t => {
+    billableSpending.forEach(t => {
       const day = String(t.posted_at).slice(0, 10);
       byDay[day] = (byDay[day] || 0) + t.amount_cents / 100;
     });
@@ -616,7 +629,7 @@ export default function TransactionsPage() {
     });
   }, [filteredSpending, dateRange]);
 
-  const totalSpend = useMemo(() => filteredSpending.reduce((s, t) => s + t.amount_cents, 0) / 100, [filteredSpending]);
+  const totalSpend = useMemo(() => billableSpending.reduce((s, t) => s + t.amount_cents, 0) / 100, [billableSpending]);
   const totalIncome = useMemo(() => income.reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100, [income]);
 
   function getName(t: Transaction) { return t.merchant_name || t.description || "Unknown"; }
