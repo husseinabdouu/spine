@@ -62,8 +62,8 @@ type AddForm = {
 
 // CSV import types
 type CsvRow = Record<string, string>;
-type CsvField = "date" | "amount" | "merchant" | "category" | "notes" | "(ignore)";
-const CSV_FIELDS: CsvField[] = ["date", "amount", "merchant", "category", "notes", "(ignore)"];
+type CsvField = "date" | "amount" | "merchant" | "category" | "type" | "notes" | "(ignore)";
+const CSV_FIELDS: CsvField[] = ["date", "amount", "merchant", "category", "type", "notes", "(ignore)"];
 
 type CsvImportStep = "idle" | "map" | "preview" | "importing" | "done";
 
@@ -128,9 +128,10 @@ function parseCsv(text: string): { headers: string[]; rows: CsvRow[] } {
   return { headers, rows };
 }
 
-/** Guess the best Spine field for a CSV column header. */
+/** Guess the best Spine field for a CSV column header (handles Origin AI column names). */
 function guessMapping(header: string): CsvField {
-  const h = header.toLowerCase();
+  const h = header.toLowerCase().trim();
+  if (/^type$/.test(h)) return "type";
   if (/date|posted|time/.test(h)) return "date";
   if (/amount|price|cost|total|sum/.test(h)) return "amount";
   if (/merchant|vendor|payee|name|description|desc/.test(h)) return "merchant";
@@ -144,56 +145,83 @@ function csvDedupeBase(date: string, amountCents: number, merchant: string): str
   return `csv_${date}_${amountCents}_${merchant.toLowerCase().replace(/\s+/g, "_")}`;
 }
 
-/** Try to parse an amount string. Preserves sign — negative = income, positive = expense. */
+/** Try to parse an amount string (strips $, commas, spaces). */
 function parseAmount(raw: string): number | null {
   const cleaned = raw.replace(/[$,\s]/g, "");
   const n = parseFloat(cleaned);
   return isNaN(n) ? null : n;
 }
 
-const TRANSFER_KEYWORDS = [
+// Origin AI Transfer-type description keywords (case-insensitive)
+const TRANSFER_DESC_KEYWORDS = [
   "ONLINE TRANSFER TO", "ONLINE TRANSFER FROM",
   "TRANSFER TO SAVINGS", "TRANSFER FROM SAVINGS",
   "TRANSFER TO CHECKING", "TRANSFER FROM CHECKING",
   "TRANSFER TO MONEY MARKET", "TRANSFER FROM MONEY MARKET",
 ];
-const ATM_KEYWORDS = ["ATM WITHDRAWAL", "CITIBANK ATM", "ATM CASH", "ATM W/D"];
-const INCOME_KEYWORDS = [
-  "ZELLE CREDIT", "VENMO CREDIT", "CASH APP CREDIT",
-  "DIRECT DEPOSIT", "PAYROLL", "ACH CREDIT",
-];
-const PEER_PAYMENT_KEYWORDS = ["ZELLE PAYMENT", "VENMO PAYMENT", "CASH APP PAYMENT"];
+const ATM_DESC_KEYWORDS    = ["ATM WITHDRAWAL", "CITIBANK ATM", "ATM CASH", "ATM W/D"];
+const ZELLE_CREDIT_KW      = ["ZELLE CREDIT", "VENMO CREDIT", "CASH APP CREDIT"];
+const INCOME_DESC_KEYWORDS = ["DIRECT DEPOSIT", "PAYROLL", "ACH CREDIT"];
+const ZELLE_PAYMENT_KW     = ["ZELLE PAYMENT", "VENMO PAYMENT", "CASH APP PAYMENT"];
 
-/**
- * Auto-categorize a CSV row based on description keywords (case-insensitive).
- * Returns the override category, or null if the mapped CSV category should be used.
- */
-function autoCategorize(description: string): string | null {
-  const upper = description.toUpperCase();
-  if (TRANSFER_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return "Internal Transfer";
-  if (ATM_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return "ATM Withdrawal";
-  if (INCOME_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return "Income";
-  if (PEER_PAYMENT_KEYWORDS.some(k => upper.includes(k.toUpperCase()))) return null;
-  return null;
+// Origin AI Expense-type category → Spine category
+const ORIGIN_EXPENSE_CAT: Record<string, string> = {
+  "drinks & dining": "Food & Drink",
+  "food & drink":    "Food & Drink",
+  "groceries":       "Essentials",
+  "auto & transport":"Transportation",
+  "transportation":  "Transportation",
+  "shopping":        "Shopping",
+  "entertainment":   "Outings",
+  "health":          "Essentials",
+  "personal care":   "Essentials",
+  "education":       "Essentials",
+  "gifts":           "Gifts",
+  "other":           "Others",
+};
+
+function matchesAny(text: string, keywords: string[]): boolean {
+  const upper = text.toUpperCase();
+  return keywords.some(k => upper.includes(k.toUpperCase()));
 }
 
 /**
- * Determine the correct sign for amount_cents for a CSV row from Origin AI / bank exports.
+ * Categorize a row from an Origin AI CSV export.
  *
- * Origin AI exports ALL values as negative numbers regardless of type.
- * Sign is determined ONLY by the auto-categorized category (keyword matching),
- * never by the raw CSV amount sign or the CSV category column value.
- *
- * Rule:
- *   category === "Income"  → store as negative amount_cents (money in)
- *   everything else        → Math.abs → store as positive amount_cents (money out)
+ * @param typeCol  Value of the "Type" column (e.g. "Transfer", "Expense")
+ * @param desc     Description / merchant name
+ * @param catCol   Value of the "Category" column from Origin AI
  */
-function resolveAmountCents(rawAmount: number, autoCategory: string | null): number {
-  if (autoCategory === "Income") {
-    return -Math.round(Math.abs(rawAmount) * 100);
+function originCategorize(typeCol: string, desc: string, catCol: string): string {
+  const type = typeCol.trim().toLowerCase();
+
+  if (type === "transfer") {
+    if (matchesAny(desc, TRANSFER_DESC_KEYWORDS))    return "Internal Transfer";
+    if (matchesAny(desc, ATM_DESC_KEYWORDS))         return "ATM Withdrawal";
+    if (matchesAny(desc, ZELLE_CREDIT_KW))           return "Income";
+    if (matchesAny(desc, INCOME_DESC_KEYWORDS))      return "Income";
+    if (matchesAny(desc, ZELLE_PAYMENT_KW))          return "Others";
+    return "Internal Transfer"; // unmatched transfer → safest default
   }
-  // Internal Transfer, ATM Withdrawal, all expense categories, Others → positive
-  return Math.round(Math.abs(rawAmount) * 100);
+
+  if (type === "expense" || type === "") {
+    const mapped = ORIGIN_EXPENSE_CAT[catCol.trim().toLowerCase()];
+    if (mapped) return mapped;
+    return "Others";
+  }
+
+  // Unknown type — fall through to Others
+  return "Others";
+}
+
+/**
+ * Amount sign convention for Origin AI CSVs:
+ *   Origin uses negative = money OUT, positive = money IN.
+ *   Spine stores expenses as positive, income as negative.
+ *   Simple flip: storedCents = Math.round(-rawAmount * 100)
+ */
+function originAmountCents(rawAmount: number): number {
+  return Math.round(-rawAmount * 100);
 }
 
 /** Try to parse a date string into YYYY-MM-DD. */
@@ -447,7 +475,7 @@ export default function TransactionsPage() {
     setCsvImportError(null);
   }
 
-  /** Build preview rows from the current mapping. Returns null if a required field is missing. */
+  /** Build preview rows from the current mapping. Returns null if required fields are missing. */
   function buildPreviewRows(): { date: string; amountCents: number; merchant: string; category: string; notes: string }[] | null {
     const dateCol     = Object.entries(csvMapping).find(([, v]) => v === "date")?.[0];
     const amountCol   = Object.entries(csvMapping).find(([, v]) => v === "amount")?.[0];
@@ -455,6 +483,7 @@ export default function TransactionsPage() {
 
     if (!dateCol || !amountCol) return null;
 
+    const typeCol     = Object.entries(csvMapping).find(([, v]) => v === "type")?.[0];
     const categoryCol = Object.entries(csvMapping).find(([, v]) => v === "category")?.[0];
     const notesCol    = Object.entries(csvMapping).find(([, v]) => v === "notes")?.[0];
 
@@ -464,27 +493,22 @@ export default function TransactionsPage() {
       const rawDate   = row[dateCol] ?? "";
       const rawAmount = row[amountCol] ?? "";
       const merchant  = merchantCol ? (row[merchantCol] ?? "") : "";
+      const typeRaw   = typeCol     ? (row[typeCol]     ?? "") : "";
       const catRaw    = categoryCol ? (row[categoryCol] ?? "") : "";
       const notes     = notesCol    ? (row[notesCol]    ?? "") : "";
 
-      const date = parseDate(rawDate);
+      const date   = parseDate(rawDate);
       const amount = parseAmount(rawAmount);
 
       if (!date || amount === null) continue;
 
       const description = merchant.trim();
 
-      // Keyword-based category takes full precedence for both sign and category label.
-      // The CSV category column is only used as a fallback when keywords don't match,
-      // and it NEVER affects sign — only autoCategorize does.
-      const autoCategory = autoCategorize(description);
-      const csvCategory  = catRaw.trim() || "Others";
-      const category     = autoCategory ?? csvCategory;
+      // Categorize using Type column + description keywords + Origin category mapping
+      const category = originCategorize(typeRaw, description, catRaw);
 
-      // Sign determined solely by autoCategory keyword result:
-      //   Income keyword → negative (money in)
-      //   Everything else → positive Math.abs (money out / neutral)
-      const amountCents = resolveAmountCents(amount, autoCategory);
+      // Sign: Origin AI uses negative = out, positive = in. Flip for Spine convention.
+      const amountCents = originAmountCents(amount);
 
       result.push({ date, amountCents, merchant: description, category, notes: notes.trim() });
     }
