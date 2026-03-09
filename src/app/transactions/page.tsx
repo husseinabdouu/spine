@@ -51,9 +51,11 @@ type EditState = {
 type AddForm = {
   type: "expense" | "income";
   date: string;
+  time: string;
   amount: string;
   merchant: string;
   category: string;
+  notes: string;
 };
 
 // CSV import types
@@ -176,9 +178,11 @@ export default function TransactionsPage() {
   const [addForm, setAddForm] = useState<AddForm>({
     type: "expense",
     date: format(new Date(), "yyyy-MM-dd"),
+    time: "",
     amount: "",
     merchant: "",
     category: "Food & Drink",
+    notes: "",
   });
 
   // Expand/edit state
@@ -331,18 +335,30 @@ export default function TransactionsPage() {
     if (!userId || !addForm.amount || !addForm.merchant) return;
     setSaving(true);
     const cents = Math.round(parseFloat(addForm.amount) * 100);
+
+    // Build posted_at_timestamp from date + optional time
+    let postedAtTimestamp: string | null = null;
+    if (addForm.date) {
+      const timeStr = addForm.time || "00:00";
+      const [h, m] = timeStr.split(":").map(Number);
+      const d = new Date(`${addForm.date}T${String(h || 0).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}:00`);
+      if (!isNaN(d.getTime())) postedAtTimestamp = d.toISOString();
+    }
+
     const { error } = await supabase.from("transactions").insert({
       user_id: userId,
       plaid_transaction_id: `manual_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       amount_cents: addForm.type === "income" ? -cents : cents,
       posted_at: addForm.date,
+      posted_at_timestamp: postedAtTimestamp,
       merchant_name: addForm.merchant,
       description: addForm.merchant,
       category: addForm.category,
+      notes: addForm.notes || null,
     });
     if (!error) {
       setShowAddModal(false);
-      setAddForm({ type: "expense", date: format(new Date(), "yyyy-MM-dd"), amount: "", merchant: "", category: "Food & Drink" });
+      setAddForm({ type: "expense", date: format(new Date(), "yyyy-MM-dd"), time: "", amount: "", merchant: "", category: "Food & Drink", notes: "" });
       loadTransactions();
     } else {
       console.error("Save failed:", error);
@@ -1062,13 +1078,13 @@ export default function TransactionsPage() {
 
             <div className="flex gap-2 mb-5 p-1 bg-[var(--glass-bg)] rounded-xl border border-[var(--glass-border)]">
               <button
-                onClick={() => setAddForm(f => ({ ...f, type: "expense", category: "Food & Drink" }))}
+                onClick={() => setAddForm(f => ({ ...f, type: "expense", category: "Food & Drink", time: f.time, notes: f.notes }))}
                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "expense" ? "bg-[var(--danger)] text-white" : "text-[var(--text-dim)] hover:text-[var(--text-strong)]"}`}
               >
                 Expense
               </button>
               <button
-                onClick={() => setAddForm(f => ({ ...f, type: "income", category: "Other Income" }))}
+                onClick={() => setAddForm(f => ({ ...f, type: "income", category: "Other Income", time: f.time, notes: f.notes }))}
                 className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${addForm.type === "income" ? "bg-[var(--safe)] text-[#080808] font-semibold" : "text-[var(--text-dim)] hover:text-[var(--text-strong)]"}`}
               >
                 Income
@@ -1082,9 +1098,13 @@ export default function TransactionsPage() {
                   <input type="date" value={addForm.date} onChange={e => setAddForm(f => ({ ...f, date: e.target.value }))} className={INPUT_CLS} />
                 </div>
                 <div>
-                  <label className="text-xs text-[var(--text-dim)] mb-1.5 block">Amount ($)</label>
-                  <input type="number" min="0" step="0.01" placeholder="0.00" value={addForm.amount} onChange={e => setAddForm(f => ({ ...f, amount: e.target.value }))} className={INPUT_CLS} />
+                  <label className="text-xs text-[var(--text-dim)] mb-1.5 block">Time <span className="text-[var(--text-muted)]">(optional)</span></label>
+                  <input type="time" value={addForm.time} onChange={e => setAddForm(f => ({ ...f, time: e.target.value }))} className={INPUT_CLS} />
                 </div>
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-dim)] mb-1.5 block">Amount ($)</label>
+                <input type="number" min="0" step="0.01" placeholder="0.00" value={addForm.amount} onChange={e => setAddForm(f => ({ ...f, amount: e.target.value }))} className={INPUT_CLS} />
               </div>
               <div>
                 <label className="text-xs text-[var(--text-dim)] mb-1.5 block">{addForm.type === "income" ? "Source" : "Merchant"}</label>
@@ -1097,6 +1117,16 @@ export default function TransactionsPage() {
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-dim)] mb-1.5 block">Notes <span className="text-[var(--text-muted)]">(optional)</span></label>
+                <textarea
+                  value={addForm.notes}
+                  onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={2}
+                  placeholder="Add a note…"
+                  className={`${INPUT_CLS} resize-none`}
+                />
               </div>
             </div>
 
