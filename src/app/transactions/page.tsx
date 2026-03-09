@@ -152,18 +152,6 @@ function parseAmount(raw: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-// Origin AI description keyword lists (case-insensitive matching)
-const TRANSFER_DESC_KEYWORDS = [
-  "ONLINE TRANSFER TO", "ONLINE TRANSFER FROM",
-  "TRANSFER TO SAVINGS", "TRANSFER FROM SAVINGS",
-  "TRANSFER TO CHECKING", "TRANSFER FROM CHECKING",
-  "TRANSFER TO MONEY MARKET", "TRANSFER FROM MONEY MARKET",
-];
-const ATM_DESC_KEYWORDS    = ["ATM WITHDRAWAL", "CITIBANK ATM", "ATM CASH", "ATM W/D"];
-const ZELLE_CREDIT_KW      = ["ZELLE CREDIT", "VENMO CREDIT", "CASH APP CREDIT"];
-const INCOME_DESC_KEYWORDS = ["DIRECT DEPOSIT", "PAYROLL", "ACH CREDIT"];
-const ZELLE_PAYMENT_KW     = ["ZELLE PAYMENT", "VENMO PAYMENT", "CASH APP PAYMENT"];
-
 // Origin AI Expense-type category → Spine category
 const ORIGIN_EXPENSE_CAT: Record<string, string> = {
   "drinks & dining":  "Food & Drink",
@@ -181,37 +169,64 @@ const ORIGIN_EXPENSE_CAT: Record<string, string> = {
   "other":            "Others",
 };
 
-function matchesAny(text: string, keywords: string[]): boolean {
-  const upper = text.toUpperCase();
-  return keywords.some(k => upper.includes(k.toUpperCase()));
+function containsCI(text: string, keyword: string): boolean {
+  return text.toUpperCase().includes(keyword.toUpperCase());
 }
 
 /**
  * Categorize a row from an Origin AI CSV export.
- * Description keywords are checked first regardless of Type column, so ATM rows
- * with Type="Transfer" are caught correctly before the transfer fallback.
+ * Rules applied in priority order (first match wins).
  *
- * @param typeCol  Value of the "Type" column (e.g. "Transfer", "Expense")
- * @param desc     Description / merchant name
- * @param catCol   Value of the "Category" column from Origin AI
+ * @param typeCol    Value of the "Type" column (e.g. "Transfer", "Expense", "Income")
+ * @param desc       Description / merchant name
+ * @param catCol     Value of the "Category" column from Origin AI
+ * @param rawAmount  Raw amount from CSV (Origin: negative = money out, positive = money in)
  */
-function originCategorize(typeCol: string, desc: string, catCol: string): string {
-  // Description keyword checks always win — applied regardless of Type value
-  if (matchesAny(desc, TRANSFER_DESC_KEYWORDS))  return "Internal Transfer";
-  if (matchesAny(desc, ATM_DESC_KEYWORDS))        return "ATM Withdrawal";
-  if (matchesAny(desc, ZELLE_CREDIT_KW))          return "Income";
-  if (matchesAny(desc, INCOME_DESC_KEYWORDS))     return "Income";
-  if (matchesAny(desc, ZELLE_PAYMENT_KW))         return "Others";
-
+function originCategorize(typeCol: string, desc: string, catCol: string, rawAmount: number): string {
   const type = typeCol.trim().toLowerCase();
-  if (type === "transfer") {
-    // Unmatched transfer with no description keyword → safest default
-    return "Internal Transfer";
+
+  // 1. Internal transfer keywords
+  const TRANSFER_KW = [
+    "ONLINE TRANSFER TO", "ONLINE TRANSFER FROM",
+    "Transfer to Checking", "Transfer from Checking",
+    "Transfer to Savings", "Transfer from Savings",
+    "Transfer to Money Market", "Transfer from Money Market",
+    "Transfer To Checking", "Transfer From Checking",
+    "Transfer To Money Market", "Transfer From Money Market",
+  ];
+  if (TRANSFER_KW.some(k => containsCI(desc, k))) return "Internal Transfer";
+
+  // 2. ATM
+  if (["ATM WITHDRAWAL", "CITIBANK ATM", "ATM CASH"].some(k => containsCI(desc, k)))
+    return "ATM Withdrawal";
+
+  // 3. Zelle Credit → Income (money coming in from another person)
+  if (containsCI(desc, "ZELLE CREDIT")) return "Income";
+
+  // 4. Zelle Debit → Others (money going out to someone)
+  if (containsCI(desc, "ZELLE DEBIT")) return "Others";
+
+  // 5. Interest Payment OR Type = Income → Income
+  if (containsCI(desc, "Interest Payment") || type === "income") return "Income";
+
+  // 6. Robinhood / Venmo / Cash App with Type = Transfer and amount going out (negative in CSV)
+  if (
+    type === "transfer" &&
+    rawAmount < 0 &&
+    ["ROBINHOOD", "VENMO", "CASH APP"].some(k => containsCI(desc, k))
+  ) return "Others";
+
+  // 7. Type = Expense → map Origin category to Spine
+  if (type === "expense") {
+    const mapped = ORIGIN_EXPENSE_CAT[catCol.trim().toLowerCase()];
+    return mapped ?? "Others";
   }
 
-  // Type = "Expense" or unknown → map Origin category to Spine
-  const mapped = ORIGIN_EXPENSE_CAT[catCol.trim().toLowerCase()];
-  return mapped ?? "Others";
+  // 8. Type = Transfer with positive amount in CSV (money coming in) → Income
+  if (type === "transfer" && rawAmount > 0) return "Income";
+
+  // 9. Everything else
+  return "Others";
 }
 
 /**
@@ -505,7 +520,8 @@ export default function TransactionsPage() {
       const description = merchant.trim();
 
       // Categorize using Type column + description keywords + Origin category mapping
-      const category = originCategorize(typeRaw, description, catRaw);
+      // Pass rawAmount so rule 6 (Robinhood/Venmo/Cash App outgoing) and rule 8 (Transfer+) work
+      const category = originCategorize(typeRaw, description, catRaw, amount);
 
       // Sign: Origin AI uses negative = out, positive = in. Flip for Spine convention.
       const amountCents = originAmountCents(amount);
@@ -637,28 +653,16 @@ export default function TransactionsPage() {
   }, [billableSpending]);
 
   const chartData = useMemo(() => {
-    if (dateRange === "all") {
-      const byMonth: Record<string, number> = {};
-      billableSpending.forEach(t => {
-        const month = String(t.posted_at).slice(0, 7);
-        byMonth[month] = (byMonth[month] || 0) + t.amount_cents / 100;
-      });
-      return Object.keys(byMonth)
-        .sort()
-        .map(m => ({ label: format(parseLocalDate(m + "-01"), "MMM yy"), spend: byMonth[m] }));
-    }
-    const byDay: Record<string, number> = {};
+    // Always aggregate by calendar month for cleaner bar chart
+    const byMonth: Record<string, number> = {};
     billableSpending.forEach(t => {
-      const day = String(t.posted_at).slice(0, 10);
-      byDay[day] = (byDay[day] || 0) + t.amount_cents / 100;
+      const month = String(t.posted_at).slice(0, 7); // "YYYY-MM"
+      byMonth[month] = (byMonth[month] || 0) + t.amount_cents / 100;
     });
-    const days = parseInt(dateRange);
-    return Array.from({ length: days }, (_, i) => {
-      const d = subDays(new Date(), days - 1 - i);
-      const ds = format(d, "yyyy-MM-dd");
-      return { label: format(d, "MMM d"), spend: byDay[ds] || 0 };
-    });
-  }, [billableSpending, dateRange]);
+    return Object.keys(byMonth)
+      .sort()
+      .map(m => ({ label: format(parseLocalDate(m + "-01"), "MMM"), spend: byMonth[m] }));
+  }, [billableSpending]);
 
   const totalSpend = useMemo(
     () => billableSpending.reduce((s, t) => s + t.amount_cents, 0) / 100,
@@ -1063,7 +1067,7 @@ export default function TransactionsPage() {
               )}
             </div>
             <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
-              <h3 className="text-sm font-medium text-[var(--text-dim)] mb-4">Daily spending</h3>
+              <h3 className="text-sm font-medium text-[var(--text-dim)] mb-4">Monthly spending</h3>
               {chartData.some(d => d.spend > 0) ? (
                 <div className="h-52">
                   <Bar
