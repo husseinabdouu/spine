@@ -137,8 +137,8 @@ function guessMapping(header: string): CsvField {
   return "(ignore)";
 }
 
-/** Deterministic dedup key: date + amount-cents + merchant (lowercased). */
-function csvDedupeKey(date: string, amountCents: number, merchant: string): string {
+/** Base dedup key component: date + amount-cents + merchant (lowercased). */
+function csvDedupeBase(date: string, amountCents: number, merchant: string): string {
   return `csv_${date}_${amountCents}_${merchant.toLowerCase().replace(/\s+/g, "_")}`;
 }
 
@@ -445,16 +445,26 @@ export default function TransactionsPage() {
     setCsvStep("importing");
     setCsvImportError(null);
 
-    const toUpsert = rows.map(r => ({
-      user_id: userId,
-      plaid_transaction_id: csvDedupeKey(r.date, r.amountCents, r.merchant),
-      amount_cents: r.amountCents,
-      posted_at: r.date,
-      merchant_name: r.merchant || null,
-      description: r.merchant || "CSV import",
-      category: r.category || "Others",
-      notes: r.notes || null,
-    }));
+    // Build per-row dedup keys with a sequence suffix so repeated transactions
+    // (e.g. two MTA swipes on the same day for the same amount) get distinct keys:
+    // csv_2026-03-01_275_mta_1, csv_2026-03-01_275_mta_2, etc.
+    // Re-importing the same CSV produces the same keys, so it stays idempotent.
+    const occurrences: Record<string, number> = {};
+    const toUpsert = rows.map(r => {
+      const base = csvDedupeBase(r.date, r.amountCents, r.merchant);
+      occurrences[base] = (occurrences[base] ?? 0) + 1;
+      const key = `${base}_${occurrences[base]}`;
+      return {
+        user_id: userId,
+        plaid_transaction_id: key,
+        amount_cents: r.amountCents,
+        posted_at: r.date,
+        merchant_name: r.merchant || null,
+        description: r.merchant || "CSV import",
+        category: r.category || "Others",
+        notes: r.notes || null,
+      };
+    });
 
     // Batch in chunks of 200 to stay within Supabase limits
     const CHUNK = 200;
@@ -722,7 +732,7 @@ export default function TransactionsPage() {
               <div className="space-y-4">
                 <p className="text-sm text-[var(--text-dim)]">
                   First 5 rows that will be imported ({previewRows?.length ?? 0} total valid rows detected).
-                  Duplicates are automatically skipped using date + amount + merchant as the dedup key.
+                  Re-importing the same CSV is safe — each row gets a unique key (date + amount + merchant + sequence number), so duplicates are skipped but repeat transactions like two MTA swipes on the same day are both imported.
                 </p>
                 {previewRows && previewRows.length > 0 ? (
                   <div className="overflow-x-auto">
