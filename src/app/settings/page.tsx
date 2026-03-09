@@ -654,8 +654,8 @@ function SettingsPageInner() {
                         {backfillResult.by_institution.map(inst => (
                           <div key={inst.institution} className="text-xs text-[var(--text-dim)] space-y-0.5">
                             <span className="font-medium text-[var(--text)]">{inst.institution}</span>
-                            {" — "}Plaid had {inst.plaid_total_claim.toLocaleString()} total
-                            {" · "}sync reported {inst.from_sync.toLocaleString()}
+                            {" — "}Plaid had {inst.plaid_total_claim?.toLocaleString() ?? 'N/A'} total
+                            {" · "}sync reported {inst.from_sync?.toLocaleString() ?? 'N/A'}
                             {" · "}webhook {inst.webhook_set ? "✓" : "✗"}
                             {" · "}refresh {inst.refresh_triggered ? "✓" : "✗"}
                           </div>
