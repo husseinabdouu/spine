@@ -605,15 +605,12 @@ export default function TransactionsPage() {
 
   // ── Data derivations ──────────────────────────────────────────────────────
 
-  // Source of truth: category, not sign.
-  // Spending tab: all transactions that are NOT Income (includes Transfers/ATM, greyed out).
-  // Income tab: ONLY category = "Income".
-  const NON_SPENDING_CATS = new Set(["Income"]);
-  const EXCLUDE_FROM_TOTALS = new Set(["Internal Transfer", "ATM Withdrawal", "Income"]);
-
+  // Source of truth is always category, never amount_cents sign.
+  //   spending  = all non-Income transactions (Transfers + ATM show greyed-out in this tab)
+  //   income    = only category = "Income"
+  //   billable  = spending minus Internal Transfer / ATM Withdrawal (used for totals/charts)
   const spending = useMemo(
-    () => transactions.filter(t => !NON_SPENDING_CATS.has(resolveCategory(t.category))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => transactions.filter(t => resolveCategory(t.category) !== "Income"),
     [transactions]
   );
   const income = useMemo(
@@ -647,10 +644,12 @@ export default function TransactionsPage() {
   }, [income, search]);
 
   // billableSpending = spending rows that count toward behavioral totals/charts
-  // (excludes Internal Transfer, ATM Withdrawal, Income)
+  // (excludes Internal Transfer, ATM Withdrawal — Income is already excluded from spending)
   const billableSpending = useMemo(
-    () => filteredSpending.filter(t => !EXCLUDE_FROM_TOTALS.has(resolveCategory(t.category))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () => filteredSpending.filter(t => {
+      const cat = resolveCategory(t.category);
+      return cat !== "Internal Transfer" && cat !== "ATM Withdrawal";
+    }),
     [filteredSpending]
   );
 
@@ -1160,7 +1159,7 @@ export default function TransactionsPage() {
                           ))}
                         </select>
                         <div className={`text-sm font-semibold w-20 text-right tabular-nums ${isExcluded ? "text-[var(--text-muted)]" : "text-[var(--text-dim)]"}`}>
-                          ${(t.amount_cents / 100).toFixed(2)}
+                          ${(Math.abs(t.amount_cents) / 100).toFixed(2)}
                         </div>
                         <ChevronUp
                           className={`w-4 h-4 text-[var(--text-muted)] transition-transform duration-200 ${isExpanded ? "rotate-0" : "rotate-180"}`}
