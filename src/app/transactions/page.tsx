@@ -605,8 +605,21 @@ export default function TransactionsPage() {
 
   // ── Data derivations ──────────────────────────────────────────────────────
 
-  const spending = useMemo(() => transactions.filter(t => t.amount_cents > 0), [transactions]);
-  const income = useMemo(() => transactions.filter(t => t.amount_cents <= 0), [transactions]);
+  // Source of truth: category, not sign.
+  // Spending tab: all transactions that are NOT Income (includes Transfers/ATM, greyed out).
+  // Income tab: ONLY category = "Income".
+  const NON_SPENDING_CATS = new Set(["Income"]);
+  const EXCLUDE_FROM_TOTALS = new Set(["Internal Transfer", "ATM Withdrawal", "Income"]);
+
+  const spending = useMemo(
+    () => transactions.filter(t => !NON_SPENDING_CATS.has(resolveCategory(t.category))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [transactions]
+  );
+  const income = useMemo(
+    () => transactions.filter(t => resolveCategory(t.category) === "Income"),
+    [transactions]
+  );
 
   const filteredSpending = useMemo(() => {
     let list = spending;
@@ -633,12 +646,10 @@ export default function TransactionsPage() {
     );
   }, [income, search]);
 
-  // Categories excluded from totals and charts (non-behavioral money movements)
-  const CHART_EXCLUDE_CATS = new Set(["Internal Transfer", "ATM Withdrawal", "Income"]);
-
-  // billableSpending = positive-amount_cents rows that count toward behavioral spending
+  // billableSpending = spending rows that count toward behavioral totals/charts
+  // (excludes Internal Transfer, ATM Withdrawal, Income)
   const billableSpending = useMemo(
-    () => filteredSpending.filter(t => !CHART_EXCLUDE_CATS.has(resolveCategory(t.category))),
+    () => filteredSpending.filter(t => !EXCLUDE_FROM_TOTALS.has(resolveCategory(t.category))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [filteredSpending]
   );
@@ -647,7 +658,7 @@ export default function TransactionsPage() {
     const byCat: Record<string, number> = {};
     billableSpending.forEach(t => {
       const cat = resolveCategory(t.category);
-      byCat[cat] = (byCat[cat] || 0) + t.amount_cents / 100;
+      byCat[cat] = (byCat[cat] || 0) + Math.abs(t.amount_cents) / 100;
     });
     return Object.entries(byCat).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [billableSpending]);
@@ -657,7 +668,7 @@ export default function TransactionsPage() {
     const byMonth: Record<string, number> = {};
     billableSpending.forEach(t => {
       const month = String(t.posted_at).slice(0, 7); // "YYYY-MM"
-      byMonth[month] = (byMonth[month] || 0) + t.amount_cents / 100;
+      byMonth[month] = (byMonth[month] || 0) + Math.abs(t.amount_cents) / 100;
     });
     return Object.keys(byMonth)
       .sort()
@@ -665,14 +676,11 @@ export default function TransactionsPage() {
   }, [billableSpending]);
 
   const totalSpend = useMemo(
-    () => billableSpending.reduce((s, t) => s + t.amount_cents, 0) / 100,
+    () => billableSpending.reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100,
     [billableSpending]
   );
-  // totalIncome: only rows with negative amount_cents AND category = Income
   const totalIncome = useMemo(
-    () => income
-      .filter(t => resolveCategory(t.category) === "Income")
-      .reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100,
+    () => income.reduce((s, t) => s + Math.abs(t.amount_cents), 0) / 100,
     [income]
   );
 
@@ -975,7 +983,7 @@ export default function TransactionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6 -mt-2">
         <p className="text-[var(--text-dim)] text-sm">
-          {spending.length.toLocaleString()} expenses · {income.length.toLocaleString()} income
+          {billableSpending.length.toLocaleString()} expenses · {income.length.toLocaleString()} income
           {dateRange !== "all" && <span className="text-[var(--text-muted)]"> (last {dateRange} days)</span>}
         </p>
         <div className="flex items-center gap-2">
@@ -1004,7 +1012,7 @@ export default function TransactionsPage() {
             ${totalSpend.toLocaleString("en-US", { minimumFractionDigits: 2 })}
           </div>
           <div className="text-xs text-[var(--text-muted)] mt-1">
-            {dateRange === "all" ? "All time" : `Last ${dateRange} days`} · {filteredSpending.length} transactions
+            {dateRange === "all" ? "All time" : `Last ${dateRange} days`} · {billableSpending.length} transactions
           </div>
         </div>
         <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
@@ -1014,7 +1022,7 @@ export default function TransactionsPage() {
           <div className="text-2xl font-bold text-[var(--safe)]">
             ${totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })}
           </div>
-          <div className="text-xs text-[var(--text-muted)] mt-1">{income.length} entries</div>
+          <div className="text-xs text-[var(--text-muted)] mt-1">{income.length.toLocaleString()} entries</div>
         </div>
         <div className="bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl p-5 backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]">
           <div className="flex items-center gap-2 text-[var(--text-dim)] text-sm mb-1">
@@ -1035,7 +1043,7 @@ export default function TransactionsPage() {
             onClick={() => setActiveTab(tab)}
             className={`px-5 py-2 rounded-lg text-sm font-medium capitalize transition-all ${activeTab === tab ? "bg-[var(--gold)] text-[#080808]" : "text-[var(--text-dim)] hover:text-[var(--text-strong)]"}`}
           >
-            {tab} ({tab === "spending" ? spending.length : income.length})
+            {tab} ({tab === "spending" ? billableSpending.length : income.length})
           </button>
         ))}
       </div>
