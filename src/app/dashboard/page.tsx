@@ -42,6 +42,7 @@ type Transaction = {
   category: string | null;
   merchant_name: string | null;
   description: string | null;
+  is_necessary_expense: boolean | null;
 };
 
 type PlaidItem = {
@@ -228,17 +229,40 @@ function recoveryColor(score: number) {
 
 const NON_BEHAVIORAL = new Set(["Internal Transfer", "ATM Withdrawal", "Income"]);
 
+/** Discretionary behavioral spend: positive amount, non-excluded category,
+ *  and not flagged as a necessary expense. */
 function isBillable(t: Transaction): boolean {
-  return t.amount_cents > 0 && !NON_BEHAVIORAL.has(t.category ?? "");
+  return (
+    t.amount_cents > 0 &&
+    !NON_BEHAVIORAL.has(t.category ?? "") &&
+    t.is_necessary_expense !== true
+  );
 }
 
-/** Daily baseline = total billable spending last 30 days ÷ 30. */
+/**
+ * Daily baseline = total discretionary spend over the available window ÷ days.
+ * Uses up to 90 days (the full transaction load) so a quieter recent month
+ * still produces a meaningful baseline instead of returning 0.
+ */
 function computeBaseline(txs: Transaction[]): number {
-  const thirtyDaysAgo = format(subDays(new Date(), 30), "yyyy-MM-dd");
-  const total = txs
-    .filter(t => isBillable(t) && String(t.posted_at).slice(0, 10) >= thirtyDaysAgo)
-    .reduce((s, t) => s + t.amount_cents / 100, 0);
-  return total / 30;
+  // Use the last 90 days — matches the loadTransactions window.
+  const ninetyDaysAgo = format(subDays(new Date(), 90), "yyyy-MM-dd");
+  const qualifying = txs.filter(
+    t => isBillable(t) && String(t.posted_at).slice(0, 10) >= ninetyDaysAgo,
+  );
+  if (!qualifying.length) return 0;
+  const total = qualifying.reduce((s, t) => s + t.amount_cents / 100, 0);
+  // Determine the actual span covered so sparse data doesn't inflate the baseline.
+  const dates = qualifying.map(t => String(t.posted_at).slice(0, 10)).sort();
+  const spanDays = Math.max(
+    1,
+    Math.round(
+      (new Date(dates[dates.length - 1]).getTime() - new Date(dates[0]).getTime()) /
+        (1000 * 60 * 60 * 24),
+    ) + 1,
+  );
+  // Cap at 90 so we never divide by more days than the window
+  return total / Math.min(spanDays, 90);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -310,7 +334,7 @@ export default function DashboardPage() {
     const cutoff = format(subDays(new Date(), 90), "yyyy-MM-dd");
     const { data } = await supabase
       .from("transactions")
-      .select("amount_cents, posted_at, category, merchant_name, description")
+      .select("amount_cents, posted_at, category, merchant_name, description, is_necessary_expense")
       .gte("posted_at", cutoff)
       .order("posted_at", { ascending: false });
     if (data) setTransactions(data);
@@ -609,22 +633,34 @@ export default function DashboardPage() {
   );
 
   // Behavioral tax this month:
-  // sum of (daily billable spend - daily baseline) on MEDIUM+HIGH risk days, clamped to ≥0
+  // sum of (daily discretionary spend - daily baseline) on MEDIUM+HIGH risk days, clamped ≥0.
+  // Only days where we actually have spending data contribute, to avoid deflating the result
+  // with zero-spend elevated days (e.g. weekends with no transactions).
   const behavioralTax = useMemo(() => {
-    if (!baseline) return 0;
+    if (baseline <= 0) return 0;
     const monthStart = format(startOfMonth(new Date()), "yyyy-MM-dd");
+    // All MEDIUM/HIGH risk days this calendar month that have an insight row
     const elevatedDates = new Set(
       insightsHistory.filter(i => i.risk_score > 30 && i.date >= monthStart).map(i => i.date),
     );
+    if (!elevatedDates.size) return 0;
+
+    // Sum discretionary spend per elevated day
     const byDay: Record<string, number> = {};
     for (const t of transactions) {
       const d = String(t.posted_at).slice(0, 10);
       if (isBillable(t) && elevatedDates.has(d))
         byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
     }
-    const elevatedDayCount = elevatedDates.size;
+
+    // Only count days that actually have spending — zero-spend elevated days
+    // (e.g. a high-risk Saturday with no purchases) should not count against the tax.
+    const daysWithSpend = Object.keys(byDay);
+    if (!daysWithSpend.length) return 0;
+
     const totalElevatedSpend = Object.values(byDay).reduce((s, v) => s + v, 0);
-    return Math.max(0, totalElevatedSpend - elevatedDayCount * baseline);
+    const tax = totalElevatedSpend - daysWithSpend.length * baseline;
+    return Math.max(0, tax);
   }, [transactions, insightsHistory, baseline]);
 
   // Transactions from days in the same risk category as today
