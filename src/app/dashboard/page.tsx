@@ -58,6 +58,7 @@ type HealthRow = {
   whoop_recovery_score: number | null;
   whoop_strain: number | null;
   resting_heart_rate: number | null;
+  created_at: string | null;
 };
 
 type InsightRow = {
@@ -286,16 +287,23 @@ export default function DashboardPage() {
   async function checkAuth() {
     const { data } = await supabase.auth.getSession();
     if (!data.session) { router.push("/setup"); return; }
+    const uid = data.session.user.id;
     setUserEmail(data.session.user.email || null);
-    setUserId(data.session.user.id);
+    setUserId(uid);
     setAuthChecked(true);
-    await Promise.all([
+
+    // Load all data in parallel; capture health rows to decide on auto-sync
+    const [, , , healthRows] = await Promise.all([
       loadConversation(),
       loadTransactions(),
       loadPlaidItems(),
       loadHealthData(),
       loadBehavioralInsights(),
     ]);
+
+    // Fire background Whoop sync if today's data is stale or missing.
+    // Does not block rendering — runs fully in the background.
+    void silentWhoopSync(uid, healthRows ?? []);
   }
 
   async function loadTransactions() {
@@ -319,10 +327,43 @@ export default function DashboardPage() {
   async function loadHealthData() {
     const { data } = await supabase
       .from("health_data")
-      .select("date, sleep_hours, hrv_avg, active_energy, whoop_recovery_score, whoop_strain, resting_heart_rate")
+      .select("date, sleep_hours, hrv_avg, active_energy, whoop_recovery_score, whoop_strain, resting_heart_rate, created_at")
       .order("date", { ascending: false })
       .limit(7);
     if (data) setHealthHistory(data);
+    return data ?? [];
+  }
+
+  /**
+   * Silently sync today's Whoop data in the background if:
+   *  - today's row is completely missing, OR
+   *  - today's row was last written more than 2 hours ago.
+   * No loading state, no toast. Refreshes health + insights when done.
+   */
+  async function silentWhoopSync(uid: string, rows: HealthRow[]) {
+    const today = format(new Date(), "yyyy-MM-dd");
+    const todayRow = rows.find(r => r.date === today);
+
+    const needsSync = !todayRow || (() => {
+      if (!todayRow.created_at) return true;
+      const ageMs = Date.now() - new Date(todayRow.created_at).getTime();
+      return ageMs > 2 * 60 * 60 * 1000; // > 2 hours
+    })();
+
+    if (!needsSync) return;
+
+    try {
+      await fetch("/api/whoop/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: uid, date: today }),
+      });
+      // Refresh health data and risk score silently after sync
+      await loadHealthData();
+      await loadBehavioralInsights();
+    } catch {
+      // Silent failure — this is a background convenience sync
+    }
   }
 
   async function loadBehavioralInsights() {
