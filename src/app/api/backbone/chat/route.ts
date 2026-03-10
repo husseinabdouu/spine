@@ -116,6 +116,28 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
   const todayHealth = healthData?.find((h) => h.date === today);
   const todayInsight = insights?.find((i) => i.date === today);
 
+  // Personal health baselines — last 30 days excluding today
+  const baselineDays = (healthData ?? []).filter((h) => h.date !== today);
+  const validSleepDays  = baselineDays.filter((h) => h.sleep_hours  != null);
+  const validHrvDays    = baselineDays.filter((h) => h.hrv_avg      != null);
+  const validStepsDays  = baselineDays.filter((h) => h.active_energy != null);
+  const validRecovDays  = baselineDays.filter((h) => h.whoop_recovery_score != null);
+
+  const personalAvgSleep    = validSleepDays.length  > 0
+    ? validSleepDays.reduce((s, h)  => s + h.sleep_hours, 0)           / validSleepDays.length  : null;
+  const personalAvgHrv      = validHrvDays.length    > 0
+    ? validHrvDays.reduce((s, h)    => s + h.hrv_avg, 0)               / validHrvDays.length    : null;
+  const personalAvgActivity = validStepsDays.length  > 0
+    ? validStepsDays.reduce((s, h)  => s + h.active_energy, 0)         / validStepsDays.length  : null;
+  const personalAvgRecovery = validRecovDays.length  > 0
+    ? validRecovDays.reduce((s, h)  => s + h.whoop_recovery_score, 0)  / validRecovDays.length  : null;
+
+  // Personal spending baseline — billable 30-day total ÷ 30
+  const billable30Spend = (transactions ?? [])
+    .filter((t) => t.amount_cents > 0)
+    .reduce((sum, t) => sum + t.amount_cents, 0) / 100;
+  const personalDailySpendBaseline = billable30Spend / 60; // 60-day window fetched
+
   const lowRiskInsights = insights?.filter((i) => i.risk_score <= 30) ?? [];
   const baselineDailySpend = calculateMedianDailySpend(
     transactions ?? [],
@@ -159,6 +181,16 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
     IMPORTANT: "Only cite numbers that appear in this object. null or 'no data' means the metric is unavailable — never invent a value.",
     today_date: today,
     health_today: healthToday,
+    // Personal baselines derived from the user's own last 30 days — use these
+    // as the reference point when contextualising today's metrics.
+    personal_baselines: {
+      avg_sleep_hours:           personalAvgSleep    != null ? Math.round(personalAvgSleep    * 10) / 10 : "no data",
+      avg_hrv_ms:                personalAvgHrv      != null ? Math.round(personalAvgHrv)              : "no data",
+      avg_activity:              personalAvgActivity != null ? Math.round(personalAvgActivity)          : "no data",
+      avg_whoop_recovery_score:  personalAvgRecovery != null ? Math.round(personalAvgRecovery * 10) / 10 : "no data",
+      avg_daily_spend_dollars:   Math.round(personalDailySpendBaseline * 100) / 100,
+      baseline_days_available:   baselineDays.length,
+    },
     risk_today: todayInsight
       ? {
           risk_score: todayInsight.risk_score,
