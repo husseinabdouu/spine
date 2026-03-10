@@ -2,12 +2,12 @@
  * Shared behavioral risk score calculation.
  * Used by /api/insights/calculate and /api/health/submit.
  *
- * Formula (per SPINE_CONTEXT.md):
- * - sleep_factor (0–30): 7+ hrs=0, 6–7=10, 5–6=20, <5=30
- * - hrv_factor (0–25): 65ms+=0, 50–65=10, 40–50=18, <40=25
- * - activity_factor (0–20): 8000+=0, 5000–8000=5, 2000–5000=10, <2000=15, +5 if workout yesterday
- * - spending_trend_factor (0–25): last 7 vs prev 7 days — ≤0%=0, 0–15%=5, 15–30%=15, >30%=25
- * - Total 0–100: LOW 0–30, MEDIUM 31–60, HIGH 61–100
+ * Formula:
+ *   healthScore  (0–100): sleep 40pts + HRV 35pts + activity 25pts
+ *   finScore     (0–100): this-week vs baseline spend ratio
+ *   riskScore    = healthScore * 0.60 + finScore * 0.40  (rounded, 0–100)
+ *
+ * Thresholds: LOW 0–30, MEDIUM 31–60, HIGH 61–100
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -21,6 +21,7 @@ export interface CalculateRiskResult {
   insights: string[];
   health_summary: { avg_sleep: string; avg_hrv: string; avg_activity: string };
   spending_summary: { last_7_days: string; prev_7_days: string; change_percent: string };
+  score_breakdown: { health_score: number; fin_score: number };
 }
 
 export async function calculateBehavioralRisk(
@@ -91,71 +92,57 @@ export async function calculateBehavioralRisk(
   const prev7DaysSpend =
     (prev7Tx ?? []).filter(isBehavioralSpend).reduce((sum, t) => sum + (t.amount_cents || 0), 0) / 100;
 
+  // ── Health component (0–100) ─────────────────────────────────────────────
+  // Sleep sub-score (0–40): higher = worse
+  let sleepFactor = 0;
+  if (sleepHours >= 7)      sleepFactor = 0;
+  else if (sleepHours >= 6) sleepFactor = 14;
+  else if (sleepHours >= 5) sleepFactor = 27;
+  else                      sleepFactor = 40;
+
+  // HRV sub-score (0–35): higher = worse
+  let hrvFactor = 0;
+  if (hrv > 0) {
+    if (hrv >= 65)      hrvFactor = 0;
+    else if (hrv >= 50) hrvFactor = 12;
+    else if (hrv >= 40) hrvFactor = 23;
+    else                hrvFactor = 35;
+  }
+
+  // Activity sub-score (0–25): higher = worse
+  let activityFactor = 0;
+  if (steps > 8000)       activityFactor = 0;
+  else if (steps >= 5000) activityFactor = 7;
+  else if (steps >= 2000) activityFactor = 14;
+  else                    activityFactor = 20;
+  if (intenseWorkoutYesterday) activityFactor = Math.min(activityFactor + 5, 25);
+
+  const healthScore = Math.min(sleepFactor + hrvFactor + activityFactor, 100);
+
+  // ── Financial component (0–100) ──────────────────────────────────────────
+  // Compare this week's daily average spend to the prior-week daily average.
+  // finScore = 0 when spending is at or below baseline; scales to 100 at 3× baseline.
+  const last7DailyAvg = last7DaysSpend / 7;
+  const prev7DailyAvg = prev7DaysSpend > 0 ? prev7DaysSpend / 7 : last7DailyAvg;
+
+  let finScore = 0;
+  if (prev7DailyAvg > 0 && last7DailyAvg > 0) {
+    const ratio = last7DailyAvg / prev7DailyAvg; // 1.0 = on baseline
+    if (ratio <= 1.0)       finScore = 0;
+    else if (ratio <= 1.15) finScore = 10;
+    else if (ratio <= 1.5)  finScore = 30;
+    else if (ratio <= 2.0)  finScore = 60;
+    else if (ratio <= 3.0)  finScore = 80;
+    else                    finScore = 100;
+  }
+
   const spendingChangePercent =
     prev7DaysSpend > 0
       ? ((last7DaysSpend - prev7DaysSpend) / prev7DaysSpend) * 100
       : 0;
 
-  // Sleep factor (0–30)
-  let sleepFactor = 0;
-  if (sleepHours >= 7) {
-    sleepFactor = 0;
-  } else if (sleepHours >= 6) {
-    sleepFactor = 10;
-  } else if (sleepHours >= 5) {
-    sleepFactor = 20;
-  } else {
-    sleepFactor = 30;
-  }
-
-  // HRV factor (0–25)
-  let hrvFactor = 0;
-  if (hrv > 0) {
-    if (hrv >= 65) {
-      hrvFactor = 0;
-    } else if (hrv >= 50) {
-      hrvFactor = 10;
-    } else if (hrv >= 40) {
-      hrvFactor = 18;
-    } else {
-      hrvFactor = 25;
-    }
-  }
-
-  // Activity factor (0–20)
-  let activityFactor = 0;
-  if (steps > 8000) {
-    activityFactor = 0;
-  } else if (steps >= 5000) {
-    activityFactor = 5;
-  } else if (steps >= 2000) {
-    activityFactor = 10;
-  } else {
-    activityFactor = 15;
-  }
-  if (intenseWorkoutYesterday) {
-    activityFactor += 5;
-  }
-  activityFactor = Math.min(activityFactor, 20);
-
-  // Spending trend factor (0–25)
-  let spendingFactor = 0;
-  if (prev7DaysSpend > 0) {
-    if (spendingChangePercent <= 0) {
-      spendingFactor = 0;
-    } else if (spendingChangePercent < 15) {
-      spendingFactor = 5;
-    } else if (spendingChangePercent <= 30) {
-      spendingFactor = 15;
-    } else {
-      spendingFactor = 25;
-    }
-  }
-
-  const riskScore = Math.min(
-    sleepFactor + hrvFactor + activityFactor + spendingFactor,
-    100
-  );
+  // ── Blended score ────────────────────────────────────────────────────────
+  const riskScore = Math.min(Math.round(healthScore * 0.6 + finScore * 0.4), 100);
 
   const riskLevel: RiskLevel =
     riskScore <= 30 ? 'LOW' : riskScore <= 60 ? 'MEDIUM' : 'HIGH';
@@ -210,6 +197,10 @@ export async function calculateBehavioralRisk(
       last_7_days: last7DaysSpend.toFixed(2),
       prev_7_days: prev7DaysSpend.toFixed(2),
       change_percent: spendingChangePercent.toFixed(1),
+    },
+    score_breakdown: {
+      health_score: Math.round(healthScore),
+      fin_score: Math.round(finScore),
     },
   };
 }

@@ -69,6 +69,10 @@ type InsightRow = {
     prev_7_days: string;
     change_percent: string;
   };
+  score_breakdown?: {
+    health_score: number;
+    fin_score: number;
+  };
 };
 
 type ConvMessage = {
@@ -221,18 +225,19 @@ function recoveryColor(score: number) {
   return "var(--danger)";
 }
 
-function computeBaseline(txs: Transaction[], insights: InsightRow[]): number {
-  const lowDates = new Set(insights.filter(i => i.risk_score <= 30).map(i => i.date));
-  const byDay: Record<string, number> = {};
-  for (const t of txs) {
-    if (t.amount_cents > 0 && lowDates.has(String(t.posted_at).slice(0, 10))) {
-      const d = String(t.posted_at).slice(0, 10);
-      byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
-    }
-  }
-  const vals = Object.values(byDay).sort((a, b) => a - b);
-  if (!vals.length) return 0;
-  return vals[Math.floor(vals.length / 2)];
+const NON_BEHAVIORAL = new Set(["Internal Transfer", "ATM Withdrawal", "Income"]);
+
+function isBillable(t: Transaction): boolean {
+  return t.amount_cents > 0 && !NON_BEHAVIORAL.has(t.category ?? "");
+}
+
+/** Daily baseline = total billable spending last 30 days ÷ 30. */
+function computeBaseline(txs: Transaction[]): number {
+  const thirtyDaysAgo = format(subDays(new Date(), 30), "yyyy-MM-dd");
+  const total = txs
+    .filter(t => isBillable(t) && String(t.posted_at).slice(0, 10) >= thirtyDaysAgo)
+    .reduce((s, t) => s + t.amount_cents / 100, 0);
+  return total / 30;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -501,25 +506,25 @@ export default function DashboardPage() {
     return m;
   }, [insightsHistory]);
 
-  // 7-day spending bars, colored by risk level
+  // 7-day spending bars (billable only), colored by risk level
   const weeklyChartData = useMemo(() => {
     const days = [];
     for (let i = 6; i >= 0; i--) {
       const d = format(subDays(new Date(), i), "yyyy-MM-dd");
       const spend = transactions
-        .filter(t => t.amount_cents > 0 && String(t.posted_at).slice(0, 10) === d)
+        .filter(t => isBillable(t) && String(t.posted_at).slice(0, 10) === d)
         .reduce((s, t) => s + t.amount_cents / 100, 0);
       days.push({ date: d, label: format(parseLocalDate(d), "EEE"), spend, riskScore: insightByDate[d] });
     }
     return days;
   }, [transactions, insightByDate]);
 
-  // Weekly / monthly spending totals + top category
+  // Weekly / monthly spending totals + top category (all exclude non-behavioral)
   const spendingStats = useMemo(() => {
     const weekCutoff  = format(subDays(new Date(), 7), "yyyy-MM-dd");
     const monthCutoff = format(startOfMonth(new Date()), "yyyy-MM-dd");
-    const weekTxs  = transactions.filter(t => t.amount_cents > 0 && String(t.posted_at).slice(0, 10) >= weekCutoff);
-    const monthTxs = transactions.filter(t => t.amount_cents > 0 && String(t.posted_at).slice(0, 10) >= monthCutoff);
+    const weekTxs  = transactions.filter(t => isBillable(t) && String(t.posted_at).slice(0, 10) >= weekCutoff);
+    const monthTxs = transactions.filter(t => isBillable(t) && String(t.posted_at).slice(0, 10) >= monthCutoff);
     const weekTotal  = weekTxs.reduce((s, t) => s + t.amount_cents / 100, 0);
     const monthTotal = monthTxs.reduce((s, t) => s + t.amount_cents / 100, 0);
     const byCat: Record<string, number> = {};
@@ -532,25 +537,29 @@ export default function DashboardPage() {
     return { weekTotal, monthTotal, topCat };
   }, [transactions]);
 
-  // Baseline (median daily spend on LOW risk days)
+  // Baseline: total billable spending last 30 days ÷ 30
   const baseline = useMemo(
-    () => computeBaseline(transactions, insightsHistory),
-    [transactions, insightsHistory],
+    () => computeBaseline(transactions),
+    [transactions],
   );
 
-  // Behavioral tax this month
+  // Behavioral tax this month:
+  // sum of (daily billable spend - daily baseline) on MEDIUM+HIGH risk days, clamped to ≥0
   const behavioralTax = useMemo(() => {
     if (!baseline) return 0;
     const monthStart = format(startOfMonth(new Date()), "yyyy-MM-dd");
-    const elevated   = new Set(
+    const elevatedDates = new Set(
       insightsHistory.filter(i => i.risk_score > 30 && i.date >= monthStart).map(i => i.date),
     );
     const byDay: Record<string, number> = {};
     for (const t of transactions) {
       const d = String(t.posted_at).slice(0, 10);
-      if (t.amount_cents > 0 && elevated.has(d)) byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
+      if (isBillable(t) && elevatedDates.has(d))
+        byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
     }
-    return Object.values(byDay).reduce((s, v) => s + Math.max(0, v - baseline), 0);
+    const elevatedDayCount = elevatedDates.size;
+    const totalElevatedSpend = Object.values(byDay).reduce((s, v) => s + v, 0);
+    return Math.max(0, totalElevatedSpend - elevatedDayCount * baseline);
   }, [transactions, insightsHistory, baseline]);
 
   // Transactions from days in the same risk category as today
@@ -564,12 +573,12 @@ export default function DashboardPage() {
     );
     if (!similar.size) return { txs: [], avgSpend: 0 };
     const txs = transactions
-      .filter(t => t.amount_cents > 0 && similar.has(String(t.posted_at).slice(0, 10)))
+      .filter(t => isBillable(t) && similar.has(String(t.posted_at).slice(0, 10)))
       .slice(0, 8);
     const byDay: Record<string, number> = {};
     for (const t of transactions) {
       const d = String(t.posted_at).slice(0, 10);
-      if (t.amount_cents > 0 && similar.has(d)) byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
+      if (isBillable(t) && similar.has(d)) byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
     }
     const vals = Object.values(byDay);
     const avgSpend = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
@@ -596,10 +605,11 @@ export default function DashboardPage() {
     const byDay: Record<string, number> = {};
     for (const t of transactions) {
       const d = String(t.posted_at).slice(0, 10);
-      if (t.amount_cents > 0 && d >= cutoff && elevated.has(d))
+      if (isBillable(t) && d >= cutoff && elevated.has(d))
         byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
     }
-    const weekTax = Object.values(byDay).reduce((s, v) => s + Math.max(0, v - (baseline || 0)), 0);
+    const weekTaxElevatedSpend = Object.values(byDay).reduce((s, v) => s + v, 0);
+    const weekTax = Math.max(0, weekTaxElevatedSpend - elevated.size * (baseline || 0));
 
     // Most common trigger: infer from health data this week
     const sleepRows = healthHistory.filter(r => r.sleep_hours != null && r.date >= cutoff);
@@ -814,6 +824,23 @@ export default function DashboardPage() {
                 >
                   {riskLabel(rScore)} RISK DAY
                 </span>
+
+                {/* Score breakdown */}
+                {todayInsight?.score_breakdown && (
+                  <div className="flex items-center justify-center gap-4 text-xs text-[var(--text-muted)]">
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-[var(--gold)] opacity-70" />
+                      Health <span className="font-semibold text-[var(--text-dim)] ml-0.5">{todayInsight.score_breakdown.health_score}</span>
+                      <span className="opacity-50">×60%</span>
+                    </span>
+                    <span className="text-[var(--border)]">·</span>
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-[var(--safe)] opacity-70" />
+                      Spending <span className="font-semibold text-[var(--text-dim)] ml-0.5">{todayInsight.score_breakdown.fin_score}</span>
+                      <span className="opacity-50">×40%</span>
+                    </span>
+                  </div>
+                )}
                 {insightBullets.length > 0 && (
                   <ul className="space-y-1.5 max-w-sm mx-auto text-left">
                     {insightBullets.map((b, i) => (
