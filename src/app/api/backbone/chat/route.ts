@@ -83,10 +83,13 @@ export async function POST(req: NextRequest) {
 }
 
 async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createClient>>, userId: string) {
-  const today = new Date().toISOString().split('T')[0];
+  // Use America/New_York so "today" matches the date stored by the iOS shortcut
+  // and Whoop sync, which run on the user's local clock — not UTC.
+  const TZ = 'America/New_York';
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
   const sixtyDaysAgo = new Date(
     Date.now() - 60 * 24 * 60 * 60 * 1000
-  ).toISOString().split('T')[0];
+  ).toLocaleDateString('en-CA', { timeZone: TZ });
 
   // Health data
   const { data: healthData } = await supabase
