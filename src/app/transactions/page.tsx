@@ -31,12 +31,14 @@ import {
   FileText,
 } from "lucide-react";
 import {
-  USER_CATEGORIES,
   ALL_CATEGORIES,
   NON_BEHAVIORAL_CATEGORIES,
-  INCOME_CATEGORIES,
   CATEGORY_COLORS,
+  CATEGORY_TREE,
+  PARENT_CATEGORIES,
   resolveCategory,
+  getParentCategory,
+  type SubCategory,
 } from "@/lib/categorize";
 
 ChartJS.register(
@@ -104,6 +106,39 @@ type CsvImportStep = "idle" | "map" | "preview" | "importing" | "done";
 
 const INPUT_CLS =
   "w-full px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--gold)]/50 text-sm";
+
+/** Renders <optgroup> options for the user-facing category picker (no system categories). */
+function CategoryOptions() {
+  return (
+    <>
+      {PARENT_CATEGORIES.map((parent) => (
+        <optgroup key={parent} label={parent}>
+          {CATEGORY_TREE[parent].map((sub) => (
+            <option key={sub} value={sub} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>
+              {sub}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  );
+}
+
+/** Renders grouped options INCLUDING system categories for the expanded-edit panel. */
+function CategoryOptionsWithSystem() {
+  return (
+    <>
+      <CategoryOptions />
+      <optgroup label="── System ──">
+        {(NON_BEHAVIORAL_CATEGORIES as readonly string[]).map((c) => (
+          <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>
+            {c}
+          </option>
+        ))}
+      </optgroup>
+    </>
+  );
+}
 
 const EDIT_INPUT_CLS =
   "w-full px-2.5 py-1.5 bg-[rgba(255,255,255,0.06)] border border-[var(--glass-border)] rounded-md text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/60 text-sm";
@@ -202,21 +237,32 @@ function parseAmount(raw: string): number | null {
   return isNaN(n) ? null : n;
 }
 
-// Origin AI Expense-type category → Spine category
-const ORIGIN_EXPENSE_CAT: Record<string, string> = {
-  "drinks & dining": "Food & Drink",
-  "food & drink": "Food & Drink",
-  groceries: "Essentials",
-  "auto & transport": "Transportation",
-  transportation: "Transportation",
-  shopping: "Shopping",
-  entertainment: "Outings",
-  health: "Essentials",
-  healthcare: "Essentials",
-  "personal care": "Essentials",
-  education: "Essentials",
-  gifts: "Gifts",
-  other: "Other",
+// Origin AI Expense-type category → Spine subcategory
+const ORIGIN_EXPENSE_CAT: Record<string, SubCategory> = {
+  "drinks & dining":  "Dining Out",
+  "food & drink":     "Dining Out",
+  "food delivery":    "Food Delivery",
+  groceries:          "Groceries",
+  "auto & transport": "Taxis & Rideshare",
+  transportation:     "Taxis & Rideshare",
+  travel:             "Travel",
+  shopping:           "Wants",
+  clothing:           "Clothing",
+  entertainment:      "Events & Concerts",
+  nightlife:          "Nightlife",
+  health:             "Medical",
+  healthcare:         "Medical",
+  "health & wellness": "Medical",
+  "personal care":    "Personal Care",
+  education:          "Needs",
+  utilities:          "Needs",
+  gifts:              "Gifts",
+  donations:          "Gifts",
+  subscriptions:      "Subscriptions",
+  "gym & fitness":    "Gym & Fitness",
+  fitness:            "Gym & Fitness",
+  investments:        "Investments",
+  other:              "Other",
 };
 
 function containsCI(text: string, keyword: string): boolean {
@@ -224,8 +270,11 @@ function containsCI(text: string, keyword: string): boolean {
 }
 
 /**
- * Categorize a row from an Origin AI CSV export.
+ * Categorize a row from an Origin AI CSV export into a Spine subcategory.
  * Rules applied in priority order (first match wins).
+ *
+ * Zelle Debit / Venmo outgoing / Cash App outgoing → "needs_classification"
+ * sentinel so the UI can prompt the user to pick a subcategory manually.
  *
  * @param typeCol    Value of the "Type" column (e.g. "Transfer", "Expense", "Income")
  * @param desc       Description / merchant name
@@ -258,32 +307,31 @@ function originCategorize(
   if (TRANSFER_KW.some((k) => containsCI(desc, k))) return "Internal Transfer";
 
   // 2. ATM
-  if (
-    ["ATM WITHDRAWAL", "CITIBANK ATM", "ATM CASH"].some((k) =>
-      containsCI(desc, k),
-    )
-  )
+  if (["ATM WITHDRAWAL", "CITIBANK ATM", "ATM CASH"].some((k) => containsCI(desc, k)))
     return "ATM Withdrawal";
 
   // 3. Zelle Credit → Income (money coming in from another person)
   if (containsCI(desc, "ZELLE CREDIT")) return "Income";
 
-  // 4. Zelle Debit → Other (money going out to someone)
-  if (containsCI(desc, "ZELLE DEBIT")) return "Other";
+  // 4. Zelle Debit / Venmo outgoing / Cash App outgoing → needs_classification
+  //    These are person-to-person payments that could be food, rent, events, etc.
+  //    Flag them so the user is prompted to pick a subcategory.
+  if (
+    containsCI(desc, "ZELLE DEBIT") ||
+    (rawAmount < 0 && containsCI(desc, "VENMO") && !containsCI(desc, "VENMO CREDIT")) ||
+    (rawAmount < 0 && containsCI(desc, "CASH APP") && !containsCI(desc, "CASH APP CREDIT"))
+  )
+    return "needs_classification";
 
   // 5. Interest Payment OR Type = Income → Income
   if (containsCI(desc, "Interest Payment") || type === "income")
     return "Income";
 
-  // 6. Robinhood / Venmo / Cash App with Type = Transfer and amount going out (negative in CSV)
-  if (
-    type === "transfer" &&
-    rawAmount < 0 &&
-    ["ROBINHOOD", "VENMO", "CASH APP"].some((k) => containsCI(desc, k))
-  )
-    return "Other";
+  // 6. Robinhood with Transfer type going out → Investments
+  if (type === "transfer" && rawAmount < 0 && containsCI(desc, "ROBINHOOD"))
+    return "Investments";
 
-  // 7. Type = Expense → map Origin category to Spine
+  // 7. Type = Expense → map Origin category to Spine subcategory
   if (type === "expense") {
     const mapped = ORIGIN_EXPENSE_CAT[catCol.trim().toLowerCase()];
     return mapped ?? "Other";
@@ -339,7 +387,7 @@ export default function TransactionsPage() {
     time: "",
     amount: "",
     merchant: "",
-    category: "Food & Drink",
+    category: "Dining Out",
     notes: "",
   });
 
@@ -543,10 +591,10 @@ export default function TransactionsPage() {
         time: "",
         amount: "",
         merchant: "",
-        category: "Food & Drink",
-        notes: "",
-      });
-      loadTransactions();
+      category: "Dining Out",
+      notes: "",
+    });
+    loadTransactions();
     } else {
       console.error("Save failed:", error);
     }
@@ -901,18 +949,7 @@ export default function TransactionsPage() {
               onChange={(e) => updateEdit(t.id, { category: e.target.value })}
               className={EDIT_INPUT_CLS}
             >
-              {ALL_CATEGORIES.map((c) => (
-                <option
-                  key={c}
-                  value={c}
-                  style={{
-                    backgroundColor: "var(--select-bg)",
-                    color: "var(--select-color)",
-                  }}
-                >
-                  {c}
-                </option>
-              ))}
+              <CategoryOptionsWithSystem />
             </select>
           </div>
           <div className="sm:col-span-2">
@@ -1447,11 +1484,18 @@ export default function TransactionsPage() {
                 className="px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none text-sm"
               >
                 <option value="all">All categories</option>
-                {ALL_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
+                {PARENT_CATEGORIES.map((parent) => (
+                  <optgroup key={parent} label={parent}>
+                    {CATEGORY_TREE[parent].map((sub) => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                  </optgroup>
                 ))}
+                <optgroup label="── System ──">
+                  {(NON_BEHAVIORAL_CATEGORIES as readonly string[]).map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </optgroup>
               </select>
               <select
                 value={dateRange}
@@ -1477,8 +1521,10 @@ export default function TransactionsPage() {
                 </div>
               ) : (
                 filteredSpending.map((t) => {
-                  const cat = resolveCategory(t.category);
-                  const color = CATEGORY_COLORS[cat] || "#71717a";
+                  const rawCat = t.category ?? "";
+                  const needsClassification = rawCat === "needs_classification";
+                  const cat = needsClassification ? ("Other" as const) : resolveCategory(t.category);
+                  const color = needsClassification ? "#ef4444" : (CATEGORY_COLORS[cat] || "#71717a");
                   const isExpanded = expandedId === t.id;
                   const isTransfer = cat === "Internal Transfer";
                   const isAtm = cat === "ATM Withdrawal";
@@ -1515,17 +1561,28 @@ export default function TransactionsPage() {
                             >
                               {getName(t)}
                             </div>
-                            <div className="text-xs text-[var(--text-muted)] mt-0.5">
-                              {format(
-                                parseLocalDate(String(t.posted_at)),
-                                "MMM d, yyyy",
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              <span className="text-xs text-[var(--text-muted)]">
+                                {format(parseLocalDate(String(t.posted_at)), "MMM d, yyyy")}
+                              </span>
+                              {!isExcluded && !needsClassification && (() => {
+                                const parent = getParentCategory(cat);
+                                return parent && parent !== cat ? (
+                                  <>
+                                    <span className="text-[var(--text-muted)] text-xs opacity-40">·</span>
+                                    <span className="text-[10px] text-[var(--text-muted)] opacity-70">{parent}</span>
+                                  </>
+                                ) : null;
+                              })()}
+                              {needsClassification && (
+                                <span className="text-[10px] text-red-400 font-medium">Needs classification</span>
                               )}
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-4 shrink-0 ml-4">
                           <select
-                            value={cat}
+                            value={needsClassification ? "" : cat}
                             onChange={(e) => {
                               e.stopPropagation();
                               updateCategory(t.id, e.target.value);
@@ -1533,23 +1590,15 @@ export default function TransactionsPage() {
                             onClick={(e) => e.stopPropagation()}
                             className="text-xs px-2.5 py-1 rounded-full border cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/50 transition-colors"
                             style={{
-                              backgroundColor: `${color}15`,
-                              borderColor: `${color}50`,
+                              backgroundColor: needsClassification ? "rgba(239,68,68,0.15)" : `${color}15`,
+                              borderColor: needsClassification ? "rgba(239,68,68,0.5)" : `${color}50`,
                               color,
                             }}
                           >
-                            {ALL_CATEGORIES.map((c) => (
-                              <option
-                                key={c}
-                                value={c}
-                                style={{
-                                  backgroundColor: "var(--select-bg)",
-                                  color: "var(--select-color)",
-                                }}
-                              >
-                                {c}
-                              </option>
-                            ))}
+                            {needsClassification && (
+                              <option value="" disabled>Classify…</option>
+                            )}
+                            <CategoryOptionsWithSystem />
                           </select>
                           <div
                             className={`text-sm font-semibold w-20 text-right tabular-nums ${isExcluded ? "text-[var(--text-muted)]" : "text-[var(--text-dim)]"}`}
@@ -1736,14 +1785,11 @@ export default function TransactionsPage() {
                   }
                   className={INPUT_CLS}
                 >
-                  {(addForm.type === "expense"
-                    ? USER_CATEGORIES
-                    : INCOME_CATEGORIES
-                  ).map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
+                  {addForm.type === "expense" ? (
+                    <CategoryOptions />
+                  ) : (
+                    <option value="Income">Income</option>
+                  )}
                 </select>
               </div>
               <div>

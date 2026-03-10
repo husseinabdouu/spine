@@ -15,7 +15,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { NON_BEHAVIORAL_CATEGORIES } from '@/lib/categorize';
+import { NON_BEHAVIORAL_CATEGORIES, getBehavioralWeight } from '@/lib/categorize';
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -141,6 +141,15 @@ export async function calculateBehavioralRisk(
     .lte('posted_at', targetDate);
 
   const nonBehavioral = NON_BEHAVIORAL_CATEGORIES as readonly string[];
+
+  /**
+   * Weight each transaction by its subcategory behavioral impulse weight.
+   * This makes the financial component sensitive to the *type* of spending,
+   * not just the raw dollar amount.
+   */
+  const weightedAmount = (t: { amount_cents: number; category?: string | null }) =>
+    t.amount_cents * getBehavioralWeight(t.category);
+
   const isBehavioralSpend = (t: { amount_cents: number; category?: string | null }) =>
     t.amount_cents > 0 && !nonBehavioral.includes(t.category ?? '');
 
@@ -151,10 +160,11 @@ export async function calculateBehavioralRisk(
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
 
+  // Use weighted amounts: $100 on food delivery (weight 0.9) = $90 weighted
   const last7DaysSpend =
     billable30
       .filter((t) => t.posted_at >= sevenDaysAgoStr)
-      .reduce((sum, t) => sum + t.amount_cents, 0) / 100;
+      .reduce((sum, t) => sum + weightedAmount(t), 0) / 100;
 
   // Previous week (days 8–14)
   const fourteenDaysAgo = new Date(targetDate);
@@ -164,11 +174,10 @@ export async function calculateBehavioralRisk(
   const prev7DaysSpend =
     billable30
       .filter((t) => t.posted_at >= fourteenDaysAgoStr && t.posted_at < sevenDaysAgoStr)
-      .reduce((sum, t) => sum + t.amount_cents, 0) / 100;
+      .reduce((sum, t) => sum + weightedAmount(t), 0) / 100;
 
-  // Personal typical weekly spend = 30-day total ÷ (30/7) ≈ 4.3 weeks
-  // This is the "what's normal for me" anchor for the financial component.
-  const total30DaysSpend = billable30.reduce((sum, t) => sum + t.amount_cents, 0) / 100;
+  // Personal typical weekly weighted spend = 30-day weighted total ÷ (30/7) ≈ 4.3 weeks
+  const total30DaysSpend = billable30.reduce((sum, t) => sum + weightedAmount(t), 0) / 100;
   const personalTypicalWeeklySpend = total30DaysSpend / (30 / 7);
 
   // ── Health component (0–100) ──────────────────────────────────────────────

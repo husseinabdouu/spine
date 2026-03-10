@@ -21,6 +21,7 @@ import {
 import { Line } from "react-chartjs-2";
 import { format, subDays, startOfMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/dateUtils";
+import { getBehavioralWeight } from "@/lib/categorize";
 import {
   ArrowUpRight,
   CheckCircle,
@@ -229,8 +230,7 @@ function recoveryColor(score: number) {
 
 const NON_BEHAVIORAL = new Set(["Internal Transfer", "ATM Withdrawal", "Income"]);
 
-/** Discretionary behavioral spend: positive amount, non-excluded category,
- *  and not flagged as a necessary expense. */
+/** Returns true if the transaction should count toward behavioral spending. */
 function isBillable(t: Transaction): boolean {
   return (
     t.amount_cents > 0 &&
@@ -240,19 +240,25 @@ function isBillable(t: Transaction): boolean {
 }
 
 /**
- * Daily baseline = total discretionary spend over the available window ÷ days.
- * Uses up to 90 days (the full transaction load) so a quieter recent month
- * still produces a meaningful baseline instead of returning 0.
+ * Behavioral weighted amount: raw cents × subcategory impulse weight.
+ * e.g. $100 food delivery (0.9) = $90 weighted; $100 groceries (0.1) = $10.
+ */
+function weightedCents(t: Transaction): number {
+  return t.amount_cents * getBehavioralWeight(t.category);
+}
+
+/**
+ * Daily weighted-behavioral baseline = total weighted discretionary spend ÷ days.
+ * Uses up to 90 days so sparse recent months still produce a real baseline.
  */
 function computeBaseline(txs: Transaction[]): number {
-  // Use the last 90 days — matches the loadTransactions window.
   const ninetyDaysAgo = format(subDays(new Date(), 90), "yyyy-MM-dd");
   const qualifying = txs.filter(
     t => isBillable(t) && String(t.posted_at).slice(0, 10) >= ninetyDaysAgo,
   );
   if (!qualifying.length) return 0;
-  const total = qualifying.reduce((s, t) => s + t.amount_cents / 100, 0);
-  // Determine the actual span covered so sparse data doesn't inflate the baseline.
+  // Use weighted amounts in the baseline so the comparison is apples-to-apples
+  const total = qualifying.reduce((s, t) => s + weightedCents(t) / 100, 0);
   const dates = qualifying.map(t => String(t.posted_at).slice(0, 10)).sort();
   const spanDays = Math.max(
     1,
@@ -261,7 +267,6 @@ function computeBaseline(txs: Transaction[]): number {
         (1000 * 60 * 60 * 24),
     ) + 1,
   );
-  // Cap at 90 so we never divide by more days than the window
   return total / Math.min(spanDays, 90);
 }
 
@@ -618,6 +623,7 @@ export default function DashboardPage() {
     const monthTotal = monthTxs.reduce((s, t) => s + t.amount_cents / 100, 0);
     const byCat: Record<string, number> = {};
     for (const t of weekTxs) {
+      // Use parent category as grouping label for top-category display
       const cat = t.category || "Other";
       byCat[cat] = (byCat[cat] ?? 0) + t.amount_cents / 100;
     }
@@ -645,12 +651,12 @@ export default function DashboardPage() {
     );
     if (!elevatedDates.size) return 0;
 
-    // Sum discretionary spend per elevated day
+    // Sum weighted discretionary spend per elevated day
     const byDay: Record<string, number> = {};
     for (const t of transactions) {
       const d = String(t.posted_at).slice(0, 10);
       if (isBillable(t) && elevatedDates.has(d))
-        byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
+        byDay[d] = (byDay[d] ?? 0) + weightedCents(t) / 100;
     }
 
     // Only count days that actually have spending — zero-spend elevated days
@@ -679,7 +685,7 @@ export default function DashboardPage() {
     const byDay: Record<string, number> = {};
     for (const t of transactions) {
       const d = String(t.posted_at).slice(0, 10);
-      if (isBillable(t) && similar.has(d)) byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
+      if (isBillable(t) && similar.has(d)) byDay[d] = (byDay[d] ?? 0) + weightedCents(t) / 100;
     }
     const vals = Object.values(byDay);
     const avgSpend = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
@@ -701,13 +707,13 @@ export default function DashboardPage() {
     const rawPct = last7[0]?.spending_summary?.change_percent;
     const spendChangePct = rawPct ? parseFloat(rawPct) : null;
 
-    // Weekly behavioral tax: sum of (daily spend - baseline) on elevated days
+    // Weekly behavioral tax: sum of (daily weighted spend - baseline) on elevated days
     const elevated = new Set(last7.filter(i => i.risk_score > 30).map(i => i.date));
     const byDay: Record<string, number> = {};
     for (const t of transactions) {
       const d = String(t.posted_at).slice(0, 10);
       if (isBillable(t) && d >= cutoff && elevated.has(d))
-        byDay[d] = (byDay[d] ?? 0) + t.amount_cents / 100;
+        byDay[d] = (byDay[d] ?? 0) + weightedCents(t) / 100;
     }
     const weekTaxElevatedSpend = Object.values(byDay).reduce((s, v) => s + v, 0);
     const weekTax = Math.max(0, weekTaxElevatedSpend - elevated.size * (baseline || 0));
