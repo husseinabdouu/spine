@@ -15,7 +15,7 @@ export type SubCategory =
   | "Food Delivery"
   | "Dining Out"
   | "Groceries"
-  | "Coffee & Drinks"
+  | "Snacks & Drinks"
   // Transportation
   | "Taxis & Rideshare"
   | "Public Transit"
@@ -53,7 +53,7 @@ export type NonBehavioralCategory = (typeof NON_BEHAVIORAL_CATEGORIES)[number];
  * Single-bucket parents list only themselves as their sole subcategory.
  */
 export const CATEGORY_TREE: Record<ParentCategory, SubCategory[]> = {
-  Food:               ["Food Delivery", "Dining Out", "Groceries", "Coffee & Drinks"],
+  Food:               ["Food Delivery", "Dining Out", "Groceries", "Snacks & Drinks"],
   Transportation:     ["Taxis & Rideshare", "Public Transit", "Gas", "Travel"],
   Purchases:          ["Clothing", "Gifts", "Personal Care", "Needs", "Wants"],
   "Health & Wellness": ["Gym & Fitness", "Medical"],
@@ -83,7 +83,7 @@ export const SUBCATEGORY_WEIGHTS: Record<SubCategory, number> = {
   "Food Delivery":     0.9,
   "Dining Out":        0.5,
   "Groceries":         0.1,
-  "Coffee & Drinks":   0.6,
+  "Snacks & Drinks":   0.65,
   "Taxis & Rideshare": 0.7,
   "Public Transit":    0.0,
   "Gas":               0.0,
@@ -125,7 +125,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   "Food Delivery":     "#ef4444",
   "Dining Out":        "#f59e0b",
   "Groceries":         "#22c55e",
-  "Coffee & Drinks":   "#d97706",
+  "Snacks & Drinks":   "#d97706",
   // Transportation
   "Taxis & Rideshare": "#06b6d4",
   "Public Transit":    "#0ea5e9",
@@ -165,7 +165,7 @@ const PLAID_TO_SUB: Record<string, SubCategory> = {
   FAST_FOOD:              "Food Delivery",
   FOOD_DELIVERY:          "Food Delivery",
   GROCERIES:              "Groceries",
-  COFFEE_SHOP:            "Coffee & Drinks",
+  COFFEE_SHOP:            "Snacks & Drinks",
 
   // Transportation
   TRANSPORTATION:         "Taxis & Rideshare",
@@ -276,7 +276,7 @@ export function resolveCategory(category: string | null | undefined): SubCategor
   if (category === "ATM Withdrawal")    return "ATM Withdrawal";
   if (category === "Income")            return "Income";
 
-  // Legacy parent category names → sensible default subcategory
+  // Legacy category names → current subcategory
   const LEGACY: Record<string, SubCategory> = {
     "Food & Drink":    "Dining Out",
     "Shopping":        "Wants",
@@ -285,6 +285,7 @@ export function resolveCategory(category: string | null | undefined): SubCategor
     "Gifts":           "Gifts",
     "Transportation":  "Taxis & Rideshare",
     "Other":           "Other",
+    "Coffee & Drinks": "Snacks & Drinks",   // renamed
   };
   if (LEGACY[category]) return LEGACY[category];
 

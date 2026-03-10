@@ -402,8 +402,16 @@ export default function TransactionsPage() {
   const [flaggedTransactions, setFlaggedTransactions] = useState<Transaction[]>([]);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
+  const [reviewSavedCount, setReviewSavedCount] = useState(0);
   // "__unset__" sentinel means "use the transaction's own default"
   const [reviewCategory, setReviewCategory] = useState("__unset__");
+  // Edit-details panel state
+  const [reviewShowEdit, setReviewShowEdit] = useState(false);
+  const [reviewEditMerchant, setReviewEditMerchant] = useState("");
+  const [reviewEditAmount, setReviewEditAmount] = useState("");
+  const [reviewEditDate, setReviewEditDate] = useState("");
+  const [reviewEditNotes, setReviewEditNotes] = useState("");
+  const [reviewEditNecessary, setReviewEditNecessary] = useState(false);
 
   // CSV import state
   const [csvStep, setCsvStep] = useState<CsvImportStep>("idle");
@@ -1294,59 +1302,16 @@ export default function TransactionsPage() {
   function renderReviewQueue() {
     if (reviewDismissed || reviewQueue.length === 0) return null;
 
-    // Cap index to valid range
-    const safeIndex = Math.min(reviewIndex, reviewQueue.length - 1);
-    const current = reviewQueue[safeIndex];
-    if (!current) return null;
-
-    const reviewed = safeIndex; // items skipped/saved before current
     const total = reviewQueue.length;
 
-    // Pre-fill category with current transaction's resolved category
-    // (or empty string if needs_classification)
-    const defaultCat =
-      current.category === "needs_classification" || !current.category
-        ? ""
-        : resolveCategory(current.category) === "Other"
-          ? ""
-          : resolveCategory(current.category);
-
-    // Use controlled reviewCategory, but seed it when we move to a new card
-    const displayCat = reviewCategory !== "__unset__" ? reviewCategory : defaultCat;
-
-    async function saveAndNext() {
-      if (!displayCat) return;
-      // Optimistic updates on both lists
-      setTransactions((prev) =>
-        prev.map((t) =>
-          t.id === current.id ? { ...t, category: displayCat } : t,
-        ),
-      );
-      setFlaggedTransactions((prev) =>
-        prev.filter((t) => t.id !== current.id),
-      );
-      await supabase
-        .from("transactions")
-        .update({ category: displayCat })
-        .eq("id", current.id);
-      setReviewCategory("__unset__");
-      // Don't advance index — the item was removed from the array so the
-      // same index now points to the next transaction automatically.
-    }
-
-    function skip() {
-      setReviewCategory("__unset__");
-      setReviewIndex((i) => i + 1);
-    }
-
-    // All reviewed (index past end)
-    if (reviewIndex >= total) {
+    // All saved → show completion banner
+    if (reviewSavedCount >= total) {
       return (
         <div className="mb-6 flex items-center justify-between gap-3 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-5 py-4 backdrop-blur-[28px]">
           <div className="flex items-center gap-2.5">
             <Check className="w-4 h-4 text-[var(--safe)]" />
             <span className="text-sm text-[var(--text-dim)]">
-              All transactions reviewed
+              All transactions categorized
             </span>
           </div>
           <button
@@ -1359,6 +1324,84 @@ export default function TransactionsPage() {
       );
     }
 
+    // Cycle through the queue — wrap around so skipped items come back
+    const safeIndex = reviewQueue.length > 0 ? reviewIndex % reviewQueue.length : 0;
+    const current = reviewQueue[safeIndex];
+    if (!current) return null;
+
+    // Pre-fill category (empty if needs_classification or Other)
+    const defaultCat =
+      current.category === "needs_classification" || !current.category
+        ? ""
+        : resolveCategory(current.category) === "Other"
+          ? ""
+          : resolveCategory(current.category);
+    const displayCat = reviewCategory !== "__unset__" ? reviewCategory : defaultCat;
+
+    // Pre-fill edit fields when showing for the first time on this card
+    const editMerchant = reviewShowEdit ? reviewEditMerchant : (current.merchant_name || current.description || "");
+    const editAmount   = reviewShowEdit ? reviewEditAmount   : (Math.abs(current.amount_cents) / 100).toFixed(2);
+    const editDate     = reviewShowEdit ? reviewEditDate     : String(current.posted_at).slice(0, 10);
+    const editNotes    = reviewShowEdit ? reviewEditNotes    : (current.notes || "");
+    const editNecessary = reviewShowEdit ? reviewEditNecessary : (current.is_necessary_expense ?? false);
+
+    function openEdit() {
+      setReviewEditMerchant(current.merchant_name || current.description || "");
+      setReviewEditAmount((Math.abs(current.amount_cents) / 100).toFixed(2));
+      setReviewEditDate(String(current.posted_at).slice(0, 10));
+      setReviewEditNotes(current.notes || "");
+      setReviewEditNecessary(current.is_necessary_expense ?? false);
+      setReviewShowEdit(true);
+    }
+
+    function resetCardState() {
+      setReviewCategory("__unset__");
+      setReviewShowEdit(false);
+    }
+
+    async function saveAndNext() {
+      if (!displayCat) return;
+
+      const amountVal = parseFloat(reviewShowEdit ? reviewEditAmount : editAmount);
+      const newCents = isNaN(amountVal) ? current.amount_cents : Math.round(amountVal * 100);
+      const newMerchant = reviewShowEdit ? reviewEditMerchant : (current.merchant_name || null);
+      const newDate = reviewShowEdit ? reviewEditDate : String(current.posted_at).slice(0, 10);
+      const newNotes = reviewShowEdit ? reviewEditNotes : current.notes;
+      const newNecessary = reviewShowEdit ? reviewEditNecessary : (current.is_necessary_expense ?? false);
+
+      const updates = {
+        category: displayCat,
+        amount_cents: newCents,
+        merchant_name: newMerchant || null,
+        description: newMerchant || null,
+        posted_at: newDate,
+        notes: newNotes || null,
+        is_necessary_expense: newNecessary,
+      };
+
+      // Optimistic update on both lists
+      setTransactions((prev) =>
+        prev.map((t) => t.id === current.id ? { ...t, ...updates } : t),
+      );
+      setFlaggedTransactions((prev) =>
+        prev.filter((t) => t.id !== current.id),
+      );
+
+      await supabase.from("transactions").update(updates).eq("id", current.id);
+
+      setReviewSavedCount((c) => c + 1);
+      resetCardState();
+      // Index stays — removed item shifts next item into position
+    }
+
+    function skip() {
+      // Move to next card without saving; item stays in the queue and wraps around
+      resetCardState();
+      setReviewIndex((i) => i + 1);
+    }
+
+    const remaining = total - reviewSavedCount;
+
     return (
       <div className="mb-6 bg-[var(--glass-bg)] border border-[var(--gold)]/30 rounded-xl overflow-hidden backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]">
         {/* Queue header */}
@@ -1366,13 +1409,15 @@ export default function TransactionsPage() {
           <div className="flex items-center gap-2.5">
             <div className="w-2 h-2 rounded-full bg-[var(--gold)] animate-pulse" />
             <span className="text-sm font-semibold text-[var(--gold)]">
-              {total} transaction{total !== 1 ? "s" : ""} need categorization
+              {remaining} transaction{remaining !== 1 ? "s" : ""} left to categorize
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-[var(--text-muted)]">
-              {reviewed} of {total} reviewed
-            </span>
+            {reviewSavedCount > 0 && (
+              <span className="text-xs text-[var(--text-muted)]">
+                {reviewSavedCount} of {total} saved
+              </span>
+            )}
             <button
               onClick={() => setReviewDismissed(true)}
               className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
@@ -1383,63 +1428,131 @@ export default function TransactionsPage() {
           </div>
         </div>
 
-        {/* Progress bar */}
+        {/* Progress bar — fills as items are SAVED (not skipped) */}
         <div className="h-0.5 bg-[var(--glass-border)]">
           <div
             className="h-full bg-[var(--gold)] transition-all duration-300"
-            style={{ width: `${(reviewed / total) * 100}%` }}
+            style={{ width: `${(reviewSavedCount / total) * 100}%` }}
           />
         </div>
 
         {/* Transaction card */}
-        <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-baseline gap-2.5 flex-wrap">
-              <span className="font-semibold text-[var(--text)] truncate">
-                {current.merchant_name || current.description || "Unknown merchant"}
-              </span>
-              <span className="text-sm font-bold text-[var(--text-dim)] tabular-nums shrink-0">
-                ${(Math.abs(current.amount_cents) / 100).toFixed(2)}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-[var(--text-muted)]">
-                {format(parseLocalDate(String(current.posted_at)), "MMM d, yyyy")}
-              </span>
-              {current.category === "needs_classification" && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">
-                  Needs classification
+        <div className="px-5 py-4">
+          {/* Top row: info + category + actions */}
+          <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline gap-2.5 flex-wrap">
+                <span className="font-semibold text-[var(--text)] truncate">
+                  {current.merchant_name || current.description || "Unknown merchant"}
                 </span>
-              )}
+                <span className="text-sm font-bold text-[var(--text-dim)] tabular-nums shrink-0">
+                  ${(Math.abs(current.amount_cents) / 100).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                <span className="text-xs text-[var(--text-muted)]">
+                  {format(parseLocalDate(String(current.posted_at)), "MMM d, yyyy")}
+                </span>
+                {current.category === "needs_classification" && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">
+                    Needs classification
+                  </span>
+                )}
+                <button
+                  onClick={() => reviewShowEdit ? setReviewShowEdit(false) : openEdit()}
+                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--gold)] transition-colors underline underline-offset-2"
+                >
+                  {reviewShowEdit ? "Hide details" : "Edit details"}
+                </button>
+              </div>
+            </div>
+
+            {/* Category picker + actions */}
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <select
+                value={displayCat}
+                onChange={(e) => setReviewCategory(e.target.value)}
+                className="px-3 py-1.5 bg-[rgba(255,255,255,0.06)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/60 text-sm min-w-[160px]"
+              >
+                <option value="" disabled>Choose category…</option>
+                {renderCategoryOptions()}
+              </select>
+              <button
+                onClick={() => void saveAndNext()}
+                disabled={!displayCat}
+                className="px-4 py-1.5 bg-[var(--gold)] hover:opacity-90 disabled:opacity-40 text-[#080808] rounded-lg text-sm font-bold transition-opacity whitespace-nowrap"
+              >
+                Save &amp; Next
+              </button>
+              <button
+                onClick={skip}
+                className="px-4 py-1.5 border border-[var(--glass-border)] hover:border-[var(--text-muted)] text-[var(--text-dim)] hover:text-[var(--text)] rounded-lg text-sm transition-colors whitespace-nowrap"
+              >
+                Skip
+              </button>
             </div>
           </div>
 
-          {/* Category picker + actions */}
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <select
-              value={displayCat}
-              onChange={(e) => setReviewCategory(e.target.value)}
-              className="px-3 py-1.5 bg-[rgba(255,255,255,0.06)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/60 text-sm min-w-[160px]"
-            >
-              <option value="" disabled>
-                Choose category…
-              </option>
-              {renderCategoryOptions()}
-            </select>
-            <button
-              onClick={() => void saveAndNext()}
-              disabled={!displayCat}
-              className="px-4 py-1.5 bg-[var(--gold)] hover:opacity-90 disabled:opacity-40 text-[#080808] rounded-lg text-sm font-bold transition-opacity whitespace-nowrap"
-            >
-              Save &amp; Next
-            </button>
-            <button
-              onClick={skip}
-              className="px-4 py-1.5 border border-[var(--glass-border)] hover:border-[var(--text-muted)] text-[var(--text-dim)] hover:text-[var(--text)] rounded-lg text-sm transition-colors whitespace-nowrap"
-            >
-              Skip
-            </button>
-          </div>
+          {/* Collapsible edit details panel */}
+          {reviewShowEdit && (
+            <div className="mt-4 pt-4 border-t border-[var(--glass-border)] grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">Merchant name</label>
+                <input
+                  type="text"
+                  value={reviewEditMerchant}
+                  onChange={(e) => setReviewEditMerchant(e.target.value)}
+                  placeholder="Merchant name"
+                  className={EDIT_INPUT_CLS}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">Amount ($)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={reviewEditAmount}
+                  onChange={(e) => setReviewEditAmount(e.target.value)}
+                  className={EDIT_INPUT_CLS}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">Date</label>
+                <input
+                  type="date"
+                  value={reviewEditDate}
+                  onChange={(e) => setReviewEditDate(e.target.value)}
+                  className={EDIT_INPUT_CLS}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-1 block">Notes</label>
+                <input
+                  type="text"
+                  value={reviewEditNotes}
+                  onChange={(e) => setReviewEditNotes(e.target.value)}
+                  placeholder="Optional note"
+                  className={EDIT_INPUT_CLS}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={reviewEditNecessary}
+                      onChange={(e) => setReviewEditNecessary(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 rounded-full border border-[var(--glass-border)] bg-[rgba(255,255,255,0.06)] peer-checked:bg-[var(--gold)] transition-colors" />
+                    <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[var(--text-muted)] peer-checked:translate-x-4 peer-checked:bg-[#080808] transition-all" />
+                  </div>
+                  <span className="text-xs text-[var(--text-dim)]">Necessary expense</span>
+                </label>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
