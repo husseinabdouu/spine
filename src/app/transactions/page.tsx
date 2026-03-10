@@ -398,7 +398,8 @@ export default function TransactionsPage() {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const savedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // Review queue state
+  // Review queue state — uses a separate all-time flagged fetch, independent of dateRange
+  const [flaggedTransactions, setFlaggedTransactions] = useState<Transaction[]>([]);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
   // "__unset__" sentinel means "use the transaction's own default"
@@ -456,9 +457,27 @@ export default function TransactionsPage() {
     setLoading(false);
   }, [dateRange]);
 
+  // Separate loader for the review queue — always fetches ALL flagged rows, no date limit.
+  const loadFlaggedTransactions = useCallback(async () => {
+    const { data } = await supabase
+      .from("transactions")
+      .select(
+        "id, merchant_name, description, amount_cents, posted_at, posted_at_timestamp, category, notes, is_necessary_expense",
+      )
+      .or("category.eq.Other,category.eq.needs_classification")
+      .order("posted_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(5000);
+    if (data) setFlaggedTransactions(data as Transaction[]);
+  }, []);
+
   useEffect(() => {
     loadTransactions();
   }, [loadTransactions]);
+
+  useEffect(() => {
+    loadFlaggedTransactions();
+  }, [loadFlaggedTransactions]);
 
   function toggleExpand(t: Transaction) {
     if (expandedId === t.id) {
@@ -850,12 +869,11 @@ export default function TransactionsPage() {
     [filteredSpending],
   );
 
-  // Transactions that need manual categorization review.
-  // Flags: category is 'Other', 'needs_classification', or
-  // any uncategorized transaction over $100.
+  // Review queue always draws from the all-time flagged fetch so the date
+  // range filter on the main list doesn't hide transactions needing review.
   const reviewQueue = useMemo(
     () =>
-      transactions.filter((t) => {
+      flaggedTransactions.filter((t) => {
         const raw = t.category ?? "";
         if (raw === "needs_classification") return true;
         if (raw === "Other" || raw === "other") return true;
@@ -863,7 +881,7 @@ export default function TransactionsPage() {
         if (resolved === "Other" && t.amount_cents > 10000) return true;
         return false;
       }),
-    [transactions],
+    [flaggedTransactions],
   );
 
   const categoryData = useMemo(() => {
@@ -1298,18 +1316,22 @@ export default function TransactionsPage() {
 
     async function saveAndNext() {
       if (!displayCat) return;
-      // Optimistic update
+      // Optimistic updates on both lists
       setTransactions((prev) =>
         prev.map((t) =>
           t.id === current.id ? { ...t, category: displayCat } : t,
         ),
+      );
+      setFlaggedTransactions((prev) =>
+        prev.filter((t) => t.id !== current.id),
       );
       await supabase
         .from("transactions")
         .update({ category: displayCat })
         .eq("id", current.id);
       setReviewCategory("__unset__");
-      setReviewIndex((i) => i + 1);
+      // Don't advance index — the item was removed from the array so the
+      // same index now points to the next transaction automatically.
     }
 
     function skip() {
