@@ -10,8 +10,15 @@ const SYSTEM_PROMPT = `You are Backbone, the behavioral finance AI inside Spine.
 Your role is to help users understand how their physical state (sleep, stress, activity)
 drives their spending behavior.
 
-Rules:
-- Always cite specific numbers from the user's data
+## STRICT DATA RULES — NEVER VIOLATE
+- The "User's Current Data" section below is the ONLY source of truth for the user's numbers.
+- If a field is null or marked "no data", you MUST NOT invent or estimate a value for it.
+  Say "I don't have your [metric] for today" instead of guessing.
+- Never cite a sleep hours, HRV, recovery score, strain, risk score, or spending figure
+  that does not appear verbatim in the User's Current Data section.
+- If today's health data is null, say so explicitly — do not reference any biometric numbers.
+
+## COMMUNICATION RULES
 - Frame everything through biology, not willpower ("your HRV was low" not "you lacked discipline")
 - Never shame users for spending — provide awareness and agency
 - Keep responses under 150 words unless depth is genuinely needed
@@ -59,7 +66,7 @@ export async function POST(req: NextRequest) {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
-      system: `${SYSTEM_PROMPT}\n\n## User's Current Context\n${JSON.stringify(context, null, 2)}`,
+      system: `${SYSTEM_PROMPT}\n\n## User's Current Data (GROUND TRUTH — only cite numbers from here)\n${JSON.stringify(context, null, 2)}`,
       messages,
     });
 
@@ -132,18 +139,33 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
     highRiskDays.length *
     Math.max(0, thisMonthSpend / 30 - baselineDailySpend);
 
+  // Build health block — only include fields with real values so Claude
+  // cannot confuse null with a plausible number.
+  const healthToday = todayHealth
+    ? {
+        date: todayHealth.date,
+        sleep_hours:          todayHealth.sleep_hours          ?? "no data",
+        hrv_avg_ms:           todayHealth.hrv_avg              ?? "no data",
+        whoop_recovery_score: todayHealth.whoop_recovery_score ?? "no data",
+        whoop_strain:         todayHealth.whoop_strain         ?? "no data",
+        resting_heart_rate:   todayHealth.resting_heart_rate   ?? "no data",
+        active_energy_steps:  todayHealth.active_energy        ?? "no data",
+        stress_level:         todayHealth.stress_level         ?? "no data",
+        sleep_quality:        todayHealth.sleep_quality        ?? "no data",
+      }
+    : "NO HEALTH DATA AVAILABLE FOR TODAY — do not cite any biometric numbers";
+
   return {
-    today: {
-      date: today,
-      sleep_hours: todayHealth?.sleep_hours ?? null,
-      sleep_quality: todayHealth?.sleep_quality ?? null,
-      hrv: todayHealth?.hrv_avg ?? null,
-      stress_level: todayHealth?.stress_level ?? null,
-      steps: todayHealth?.active_energy ?? null,
-      risk_score: todayInsight?.risk_score ?? null,
-      risk_level: getRiskLevel(todayInsight?.risk_score),
-      active_triggers: todayInsight?.insights ?? [],
-    },
+    IMPORTANT: "Only cite numbers that appear in this object. null or 'no data' means the metric is unavailable — never invent a value.",
+    today_date: today,
+    health_today: healthToday,
+    risk_today: todayInsight
+      ? {
+          risk_score: todayInsight.risk_score,
+          risk_level: getRiskLevel(todayInsight.risk_score),
+          active_triggers: todayInsight.insights ?? [],
+        }
+      : "NO RISK SCORE CALCULATED YET",
     spending: {
       this_month_total_dollars: Math.round(thisMonthSpend),
       baseline_daily_dollars: Math.round(baselineDailySpend),
@@ -158,7 +180,7 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
         })),
     },
     patterns: {
-      data_days_available: healthData?.length ?? 0,
+      health_data_days_available: healthData?.length ?? 0,
       high_risk_days_this_month: highRiskDays.length,
     },
   };
