@@ -398,6 +398,12 @@ export default function TransactionsPage() {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const savedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  // Review queue state
+  const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [reviewIndex, setReviewIndex] = useState(0);
+  // "__unset__" sentinel means "use the transaction's own default"
+  const [reviewCategory, setReviewCategory] = useState("__unset__");
+
   // CSV import state
   const [csvStep, setCsvStep] = useState<CsvImportStep>("idle");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -844,6 +850,22 @@ export default function TransactionsPage() {
     [filteredSpending],
   );
 
+  // Transactions that need manual categorization review.
+  // Flags: category is 'Other', 'needs_classification', or
+  // any uncategorized transaction over $100.
+  const reviewQueue = useMemo(
+    () =>
+      transactions.filter((t) => {
+        const raw = t.category ?? "";
+        if (raw === "needs_classification") return true;
+        if (raw === "Other" || raw === "other") return true;
+        const resolved = resolveCategory(t.category);
+        if (resolved === "Other" && t.amount_cents > 10000) return true;
+        return false;
+      }),
+    [transactions],
+  );
+
   const categoryData = useMemo(() => {
     const byParent: Record<string, number> = {};
     billableSpending.forEach((t) => {
@@ -1249,6 +1271,158 @@ export default function TransactionsPage() {
     );
   }
 
+  // ── Review queue ──────────────────────────────────────────────────────────
+
+  function renderReviewQueue() {
+    if (reviewDismissed || reviewQueue.length === 0) return null;
+
+    // Cap index to valid range
+    const safeIndex = Math.min(reviewIndex, reviewQueue.length - 1);
+    const current = reviewQueue[safeIndex];
+    if (!current) return null;
+
+    const reviewed = safeIndex; // items skipped/saved before current
+    const total = reviewQueue.length;
+
+    // Pre-fill category with current transaction's resolved category
+    // (or empty string if needs_classification)
+    const defaultCat =
+      current.category === "needs_classification" || !current.category
+        ? ""
+        : resolveCategory(current.category) === "Other"
+          ? ""
+          : resolveCategory(current.category);
+
+    // Use controlled reviewCategory, but seed it when we move to a new card
+    const displayCat = reviewCategory !== "__unset__" ? reviewCategory : defaultCat;
+
+    async function saveAndNext() {
+      if (!displayCat) return;
+      // Optimistic update
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === current.id ? { ...t, category: displayCat } : t,
+        ),
+      );
+      await supabase
+        .from("transactions")
+        .update({ category: displayCat })
+        .eq("id", current.id);
+      setReviewCategory("__unset__");
+      setReviewIndex((i) => i + 1);
+    }
+
+    function skip() {
+      setReviewCategory("__unset__");
+      setReviewIndex((i) => i + 1);
+    }
+
+    // All reviewed (index past end)
+    if (reviewIndex >= total) {
+      return (
+        <div className="mb-6 flex items-center justify-between gap-3 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-xl px-5 py-4 backdrop-blur-[28px]">
+          <div className="flex items-center gap-2.5">
+            <Check className="w-4 h-4 text-[var(--safe)]" />
+            <span className="text-sm text-[var(--text-dim)]">
+              All transactions reviewed
+            </span>
+          </div>
+          <button
+            onClick={() => setReviewDismissed(true)}
+            className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mb-6 bg-[var(--glass-bg)] border border-[var(--gold)]/30 rounded-xl overflow-hidden backdrop-blur-[28px] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]">
+        {/* Queue header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--glass-border)]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-2 h-2 rounded-full bg-[var(--gold)] animate-pulse" />
+            <span className="text-sm font-semibold text-[var(--gold)]">
+              {total} transaction{total !== 1 ? "s" : ""} need categorization
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[var(--text-muted)]">
+              {reviewed} of {total} reviewed
+            </span>
+            <button
+              onClick={() => setReviewDismissed(true)}
+              className="text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+              aria-label="Dismiss review queue"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-0.5 bg-[var(--glass-border)]">
+          <div
+            className="h-full bg-[var(--gold)] transition-all duration-300"
+            style={{ width: `${(reviewed / total) * 100}%` }}
+          />
+        </div>
+
+        {/* Transaction card */}
+        <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2.5 flex-wrap">
+              <span className="font-semibold text-[var(--text)] truncate">
+                {current.merchant_name || current.description || "Unknown merchant"}
+              </span>
+              <span className="text-sm font-bold text-[var(--text-dim)] tabular-nums shrink-0">
+                ${(Math.abs(current.amount_cents) / 100).toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-[var(--text-muted)]">
+                {format(parseLocalDate(String(current.posted_at)), "MMM d, yyyy")}
+              </span>
+              {current.category === "needs_classification" && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">
+                  Needs classification
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Category picker + actions */}
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <select
+              value={displayCat}
+              onChange={(e) => setReviewCategory(e.target.value)}
+              className="px-3 py-1.5 bg-[rgba(255,255,255,0.06)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--gold)]/60 text-sm min-w-[160px]"
+            >
+              <option value="" disabled>
+                Choose category…
+              </option>
+              {renderCategoryOptions()}
+            </select>
+            <button
+              onClick={() => void saveAndNext()}
+              disabled={!displayCat}
+              className="px-4 py-1.5 bg-[var(--gold)] hover:opacity-90 disabled:opacity-40 text-[#080808] rounded-lg text-sm font-bold transition-opacity whitespace-nowrap"
+            >
+              Save &amp; Next
+            </button>
+            <button
+              onClick={skip}
+              className="px-4 py-1.5 border border-[var(--glass-border)] hover:border-[var(--text-muted)] text-[var(--text-dim)] hover:text-[var(--text)] rounded-lg text-sm transition-colors whitespace-nowrap"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── Main render ───────────────────────────────────────────────────────────
 
   return (
@@ -1296,6 +1470,9 @@ export default function TransactionsPage() {
           </button>
         </div>
       </div>
+
+      {/* Review queue */}
+      {renderReviewQueue()}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
