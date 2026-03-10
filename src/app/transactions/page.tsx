@@ -31,7 +31,6 @@ import {
   FileText,
 } from "lucide-react";
 import {
-  ALL_CATEGORIES,
   NON_BEHAVIORAL_CATEGORIES,
   CATEGORY_COLORS,
   CATEGORY_TREE,
@@ -107,29 +106,25 @@ type CsvImportStep = "idle" | "map" | "preview" | "importing" | "done";
 const INPUT_CLS =
   "w-full px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--gold)]/50 text-sm";
 
-/** Renders <optgroup> options for the user-facing category picker (no system categories). */
-function CategoryOptions() {
-  return (
-    <>
-      {PARENT_CATEGORIES.map((parent) => (
-        <optgroup key={parent} label={parent}>
-          {CATEGORY_TREE[parent].map((sub) => (
-            <option key={sub} value={sub} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>
-              {sub}
-            </option>
-          ))}
-        </optgroup>
+/** Returns grouped <optgroup>/<option> elements for user-facing category picker. */
+function renderCategoryOptions() {
+  return PARENT_CATEGORIES.map((parent) => (
+    <optgroup key={parent} label={parent}>
+      {CATEGORY_TREE[parent].map((sub) => (
+        <option key={sub} value={sub} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>
+          {sub}
+        </option>
       ))}
-    </>
-  );
+    </optgroup>
+  ));
 }
 
-/** Renders grouped options INCLUDING system categories for the expanded-edit panel. */
-function CategoryOptionsWithSystem() {
+/** Returns grouped options INCLUDING system categories for the expanded-edit panel. */
+function renderCategoryOptionsWithSystem() {
   return (
     <>
-      <CategoryOptions />
-      <optgroup label="── System ──">
+      {renderCategoryOptions()}
+      <optgroup label="System">
         {(NON_BEHAVIORAL_CATEGORIES as readonly string[]).map((c) => (
           <option key={c} value={c} style={{ backgroundColor: "var(--select-bg)", color: "var(--select-color)" }}>
             {c}
@@ -949,7 +944,7 @@ export default function TransactionsPage() {
               onChange={(e) => updateEdit(t.id, { category: e.target.value })}
               className={EDIT_INPUT_CLS}
             >
-              <CategoryOptionsWithSystem />
+              {renderCategoryOptionsWithSystem()}
             </select>
           </div>
           <div className="sm:col-span-2">
@@ -1598,7 +1593,7 @@ export default function TransactionsPage() {
                             {needsClassification && (
                               <option value="" disabled>Classify…</option>
                             )}
-                            <CategoryOptionsWithSystem />
+                            {renderCategoryOptionsWithSystem()}
                           </select>
                           <div
                             className={`text-sm font-semibold w-20 text-right tabular-nums ${isExcluded ? "text-[var(--text-muted)]" : "text-[var(--text-dim)]"}`}
@@ -1685,7 +1680,7 @@ export default function TransactionsPage() {
                   setAddForm((f) => ({
                     ...f,
                     type: "expense",
-                    category: "Food & Drink",
+                    category: "Dining Out",
                     time: f.time,
                     notes: f.notes,
                   }))
@@ -1786,7 +1781,7 @@ export default function TransactionsPage() {
                   className={INPUT_CLS}
                 >
                   {addForm.type === "expense" ? (
-                    <CategoryOptions />
+                    renderCategoryOptions()
                   ) : (
                     <option value="Income">Income</option>
                   )}
