@@ -394,7 +394,7 @@ function SettingsPageInner() {
   const initials = userEmail ? userEmail.slice(0, 2).toUpperCase() : "??";
 
   return (
-    <AppShell title="Settings" userEmail={userEmail} onLogout={logout}>
+    <AppShell title="Settings" userEmail={userEmail} onLogout={() => void logout()}>
       <div className="max-w-2xl space-y-5">
 
         {/* ── Account ─────────────────────────────────────────────────────── */}
@@ -418,7 +418,7 @@ function SettingsPageInner() {
           </div>
           <div className="mt-5 pt-5 border-t border-[var(--border)]">
             <button
-              onClick={logout}
+              onClick={() => void logout()}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--danger)]/30 text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors text-sm font-medium"
             >
               <LogOut className="w-4 h-4" />
@@ -485,7 +485,7 @@ function SettingsPageInner() {
                     )}
                   </div>
                   <button
-                    onClick={updateWebhook}
+                    onClick={() => void updateWebhook()}
                     disabled={updatingWebhook}
                     className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] border border-[var(--border)] text-[var(--text-dim)] text-sm font-semibold disabled:opacity-40 transition-colors"
                   >
@@ -505,7 +505,7 @@ function SettingsPageInner() {
                     </p>
                   </div>
                   <button
-                    onClick={runDiagnose}
+                    onClick={() => void runDiagnose()}
                     disabled={diagnosing}
                     className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] border border-[var(--border)] text-[var(--text-dim)] text-sm font-semibold disabled:opacity-40 transition-colors"
                   >
@@ -615,7 +615,7 @@ function SettingsPageInner() {
                     </p>
                   </div>
                   <button
-                    onClick={runBackfill}
+                    onClick={() => void runBackfill()}
                     disabled={backfilling}
                     className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] text-sm font-semibold disabled:opacity-40 transition-colors"
                   >
@@ -724,7 +724,7 @@ function SettingsPageInner() {
             <div className="flex items-center gap-2 bg-[var(--code-bg)] border border-[var(--border)] rounded-lg px-4 py-3">
               <code className="text-xs text-[var(--gold)] flex-1 truncate font-mono">{SHORTCUT_URL}</code>
               <button
-                onClick={copyUrl}
+                onClick={() => void copyUrl()}
                 className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
               >
                 {copied ? <Check className="w-4 h-4 text-[var(--safe)]" /> : <Copy className="w-4 h-4" />}
@@ -806,7 +806,7 @@ function SettingsPageInner() {
 
               <div className="flex items-center gap-3">
                 <button
-                  onClick={syncWhoop}
+                  onClick={() => void syncWhoop()}
                   disabled={whoopSyncing}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--glass-mid)] hover:bg-[var(--glass-hover)] text-sm text-[var(--text-dim)] disabled:opacity-40 transition-colors"
                 >
@@ -814,7 +814,7 @@ function SettingsPageInner() {
                   {whoopSyncing ? "Syncing…" : "Sync now"}
                 </button>
                 <button
-                  onClick={disconnectWhoop}
+                  onClick={() => void disconnectWhoop()}
                   disabled={disconnectingWhoop}
                   className="text-xs text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors disabled:opacity-40"
                 >
@@ -835,7 +835,7 @@ function SettingsPageInner() {
                     </p>
                   </div>
                   <button
-                    onClick={backfillWhoop}
+                    onClick={() => void backfillWhoop()}
                     disabled={whoopBackfilling}
                     className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-lg bg-[#00D4A4]/10 hover:bg-[#00D4A4]/20 border border-[#00D4A4]/30 text-[#00D4A4] text-sm font-semibold disabled:opacity-40 transition-colors"
                   >

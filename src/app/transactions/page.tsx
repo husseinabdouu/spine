@@ -1188,7 +1188,7 @@ export default function TransactionsPage() {
                   ← Back
                 </button>
                 <button
-                  onClick={runCsvImport}
+                  onClick={() => void runCsvImport()}
                   disabled={!previewRows || previewRows.length === 0}
                   className="px-5 py-2 bg-[var(--gold)] hover:opacity-90 disabled:opacity-50 text-[#080808] rounded-xl text-sm font-bold transition-opacity"
                 >
@@ -1213,7 +1213,7 @@ export default function TransactionsPage() {
   // ── Main render ───────────────────────────────────────────────────────────
 
   return (
-    <AppShell title="Transactions" userEmail={userEmail} onLogout={logout}>
+    <AppShell title="Transactions" userEmail={userEmail} onLogout={() => void logout()}>
       {/* Hidden CSV file input */}
       <input
         ref={csvFileRef}
@@ -1771,7 +1771,7 @@ export default function TransactionsPage() {
                 Cancel
               </button>
               <button
-                onClick={saveManualTransaction}
+                onClick={() => void saveManualTransaction()}
                 disabled={saving || !addForm.amount || !addForm.merchant}
                 className="flex-1 py-2.5 bg-[var(--gold)] hover:opacity-90 disabled:opacity-50 text-[#080808] rounded-xl text-sm font-bold transition-opacity"
               >

@@ -786,7 +786,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <AppShell userEmail={userEmail} onLogout={logout}>
+    <AppShell userEmail={userEmail} onLogout={() => void logout()}>
 
       {/* ── No bank connected banner ────────────────────────────────────────── */}
       {plaidItems.length === 0 && (
@@ -886,7 +886,7 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 <p className="text-sm text-[var(--text-muted)]">No risk score yet</p>
                 <button
-                  onClick={calculateBehavioralRisk}
+                  onClick={() => void calculateBehavioralRisk()}
                   disabled={calculating}
                   className="text-sm px-5 py-2 rounded-xl bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] disabled:opacity-40 transition-colors"
                 >
@@ -1348,7 +1348,7 @@ export default function DashboardPage() {
             {insightsHistory.length === 0 && plaidItems.length > 0 && (
               <li>
                 <button
-                  onClick={calculateBehavioralRisk}
+                  onClick={() => void calculateBehavioralRisk()}
                   disabled={calculating}
                   className="text-xs px-3 py-1.5 rounded-lg bg-[var(--gold)]/15 hover:bg-[var(--gold)]/25 border border-[var(--gold)]/30 text-[var(--gold)] transition-colors disabled:opacity-40"
                 >

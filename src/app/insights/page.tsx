@@ -217,7 +217,7 @@ export default function InsightsPage() {
   const spendChange = insight ? parseFloat(insight.spending_summary.change_percent) : 0;
 
   return (
-    <AppShell userEmail={userEmail} onLogout={logout}>
+    <AppShell userEmail={userEmail} onLogout={() => void logout()}>
       <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 items-start">
 
         {/* ── Sidebar ── */}
@@ -228,7 +228,7 @@ export default function InsightsPage() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-[var(--text-dim)]">Behavioral Risk</h3>
               <button
-                onClick={calculateRisk}
+                onClick={() => void calculateRisk()}
                 disabled={calculating}
                 className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-[var(--glass-bg)] border border-[var(--glass-border)] text-[var(--text-dim)] hover:text-[var(--text-strong)] disabled:opacity-50 transition-colors"
               >
@@ -262,7 +262,7 @@ export default function InsightsPage() {
                 </p>
                 {dataLoaded && health && (
                   <button
-                    onClick={calculateRisk}
+                    onClick={() => void calculateRisk()}
                     disabled={calculating}
                     className="px-4 py-2 bg-[var(--gold)] text-[#080808] rounded-lg text-sm font-bold disabled:opacity-50"
                   >

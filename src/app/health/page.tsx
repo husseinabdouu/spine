@@ -298,7 +298,7 @@ export default function HealthPage() {
   if (!userId) return null;
 
   return (
-    <AppShell userEmail={userEmail ?? undefined} onLogout={logout}>
+    <AppShell userEmail={userEmail ?? undefined} onLogout={() => void logout()}>
       <div className="space-y-5 pb-8">
 
         {/* ── Header ── */}
@@ -324,7 +324,7 @@ export default function HealthPage() {
               ))}
             </div>
             <button
-              onClick={refreshToday}
+              onClick={() => void refreshToday()}
               disabled={syncing}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs font-medium text-[var(--text-dim)] hover:text-[var(--text-strong)] hover:border-[var(--border)] transition-colors disabled:opacity-50"
             >

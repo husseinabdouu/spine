@@ -78,7 +78,7 @@ export default function SetupPage() {
           <div className="space-y-3 mb-6">
             {/* Google */}
             <button
-              onClick={loginWithGoogle}
+              onClick={() => void loginWithGoogle()}
               className="w-full inline-flex items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white px-6 py-3.5 font-semibold text-[#1f1f1f] shadow-sm transition-all hover:bg-gray-50 hover:shadow-md"
             >
               <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" xmlns="http://www.w3.org/2000/svg">
@@ -92,7 +92,7 @@ export default function SetupPage() {
 
             {/* GitHub */}
             <button
-              onClick={loginWithGitHub}
+              onClick={() => void loginWithGitHub()}
               className="w-full inline-flex items-center justify-center gap-3 rounded-xl bg-[#24292e] px-6 py-3.5 font-bold text-white shadow-lg transition-all hover:bg-[#1a1f24] hover:shadow-xl"
             >
               <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0 fill-white" xmlns="http://www.w3.org/2000/svg">
