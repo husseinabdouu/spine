@@ -409,9 +409,14 @@ export default function DashboardPage() {
   }
 
   async function loadConversation() {
+    // Only load today's messages — prior-day messages carry stale/hallucinated
+    // health numbers that the model anchors on and repeats.
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
     const { data } = await supabase
       .from("backbone_conversations")
       .select("id, role, content, created_at")
+      .gte("created_at", todayStart.toISOString())
       .order("created_at", { ascending: true });
     setMiniMessages((data ?? []) as ConvMessage[]);
   }
@@ -422,6 +427,20 @@ export default function DashboardPage() {
     const token = sessionData.session?.access_token;
     if (!token) return;
     setMiniLoading(true);
+
+    // Clear any existing conversation rows for today before generating a fresh
+    // opening. This prevents yesterday's or an earlier session's hallucinated
+    // numbers from leaking into the new context window.
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    await supabase
+      .from("backbone_conversations")
+      .delete()
+      .eq("user_id", userId)
+      .gte("created_at", todayStart.toISOString());
+
+    // Build a grounded opening prompt using only verified values from state —
+    // these come from the DB query in loadHealthData(), not from chat history.
     const parts: string[] = [];
     if (todayHealth?.whoop_recovery_score != null) parts.push(`Recovery ${todayHealth.whoop_recovery_score}%`);
     if (todayHealth?.hrv_avg != null)              parts.push(`HRV ${todayHealth.hrv_avg}ms`);
@@ -438,6 +457,8 @@ export default function DashboardPage() {
       const res = await fetch("/api/backbone/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        // Never pass prior conversation history to the opening — the system
+        // prompt context is already fully grounded with today's DB data.
         body: JSON.stringify({ message: openingPrompt, conversationHistory: [] }),
       });
       const data = await res.json();
@@ -468,6 +489,9 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           message: text,
+          // miniMessages is already filtered to today-only by loadConversation —
+          // send the last 10 so the model has the current session's turn history
+          // without carrying over stale prior-day hallucinations.
           conversationHistory: miniMessages.slice(-10).map(m => ({ role: m.role, content: m.content })),
         }),
       });
