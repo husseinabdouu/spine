@@ -106,6 +106,12 @@ type CsvImportStep = "idle" | "map" | "preview" | "importing" | "done";
 const INPUT_CLS =
   "w-full px-3 py-2 bg-[var(--glass-bg)] border border-[var(--glass-border)] rounded-lg text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--gold)]/50 text-sm";
 
+/** Returns a display color for a parent category using its first subcategory's color. */
+function parentCategoryColor(parent: string): string {
+  const firstSub = CATEGORY_TREE[parent as keyof typeof CATEGORY_TREE]?.[0];
+  return (firstSub ? CATEGORY_COLORS[firstSub] : null) ?? "#71717a";
+}
+
 /** Returns grouped <optgroup>/<option> elements for user-facing category picker. */
 function renderCategoryOptions() {
   return PARENT_CATEGORIES.map((parent) => (
@@ -839,12 +845,13 @@ export default function TransactionsPage() {
   );
 
   const categoryData = useMemo(() => {
-    const byCat: Record<string, number> = {};
+    const byParent: Record<string, number> = {};
     billableSpending.forEach((t) => {
-      const cat = resolveCategory(t.category);
-      byCat[cat] = (byCat[cat] || 0) + Math.abs(t.amount_cents) / 100;
+      const sub = resolveCategory(t.category);
+      const parent = getParentCategory(sub) ?? "Other";
+      byParent[parent] = (byParent[parent] || 0) + Math.abs(t.amount_cents) / 100;
     });
-    return Object.entries(byCat)
+    return Object.entries(byParent)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
   }, [billableSpending]);
@@ -1363,7 +1370,7 @@ export default function TransactionsPage() {
                         {
                           data: categoryData.map((d) => d.value),
                           backgroundColor: categoryData.map(
-                            (d) => CATEGORY_COLORS[d.name] || "#71717a",
+                            (d) => parentCategoryColor(d.name),
                           ),
                           borderWidth: 0,
                           hoverOffset: 4,
