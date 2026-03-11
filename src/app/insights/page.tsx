@@ -379,7 +379,7 @@ export default function InsightsPage() {
                 {SUGGESTED.map(q => (
                   <button
                     key={q}
-                    onClick={() => sendMessage(q)}
+                    onClick={() => void sendMessage(q)}
                     className="block w-full text-left px-4 py-2.5 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-subtle)] text-sm text-[var(--text-dim)] hover:text-[var(--text-strong)] hover:border-[var(--gold)]/40 transition-all"
                   >
                     {q}
@@ -430,12 +430,12 @@ export default function InsightsPage() {
                 type="text"
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && sendMessage(input)}
+                onKeyDown={e => { if (e.key === "Enter") void sendMessage(input); }}
                 placeholder="Ask Backbone…"
                 className="flex-1 px-4 py-2.5 border border-[var(--glass-border)] rounded-xl bg-[var(--glass-subtle)] text-sm text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:ring-2 focus:ring-[var(--gold)]/40"
               />
               <button
-                onClick={() => sendMessage(input)}
+                onClick={() => void sendMessage(input)}
                 disabled={!input.trim() || isLoading}
                 className="px-3.5 py-2.5 bg-[var(--gold)] text-[#080808] rounded-xl disabled:opacity-40 transition-opacity hover:opacity-90"
               >

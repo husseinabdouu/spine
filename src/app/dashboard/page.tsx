@@ -304,7 +304,7 @@ export default function DashboardPage() {
     if (!authChecked || !userId || hasGeneratedOpening.current) return;
     if (miniMessages.length === 0 && (healthHistory.length > 0 || insightsHistory.length > 0)) {
       hasGeneratedOpening.current = true;
-      generateOpening();
+      void generateOpening();
     }
   }, [authChecked, userId, miniMessages.length, healthHistory.length, insightsHistory.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1139,12 +1139,12 @@ export default function DashboardPage() {
               type="text"
               value={miniInput}
               onChange={e => setMiniInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && sendMiniChat(miniInput)}
+              onKeyDown={e => { if (e.key === "Enter") void sendMiniChat(miniInput); }}
               placeholder="Ask Backbone…"
               className="flex-1 px-3 py-2 text-xs border border-[var(--glass-border)] rounded-lg bg-[var(--glass-subtle)] text-[var(--text)] placeholder-[var(--text-muted)] outline-none focus:ring-1 focus:ring-[var(--gold)]/40"
             />
             <button
-              onClick={() => sendMiniChat(miniInput)}
+              onClick={() => void sendMiniChat(miniInput)}
               disabled={!miniInput.trim() || miniLoading}
               className="px-3 py-2 bg-[var(--gold)] text-[#080808] rounded-lg disabled:opacity-40 transition-opacity hover:opacity-90"
             >
