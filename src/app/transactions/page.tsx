@@ -29,6 +29,7 @@ import {
   Check,
   Upload,
   FileText,
+  RefreshCw,
 } from "lucide-react";
 import {
   NON_BEHAVIORAL_CATEGORIES,
@@ -382,6 +383,7 @@ export default function TransactionsPage() {
   const [activeTab, setActiveTab] = useState<"spending" | "income">("spending");
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [addForm, setAddForm] = useState<AddForm>({
     type: "expense",
     date: format(new Date(), "yyyy-MM-dd"),
@@ -440,6 +442,25 @@ export default function TransactionsPage() {
   async function logout() {
     await supabase.auth.signOut();
     router.push("/setup");
+  }
+
+  async function syncTransactions() {
+    if (!userId || syncing) return;
+    setSyncing(true);
+    try {
+      await fetch("/api/plaid/sync-transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // No force_resync — uses stored cursor so only new transactions are pulled
+        body: JSON.stringify({ user_id: userId }),
+      });
+      // Refresh both the main list and the flagged queue
+      await Promise.all([loadTransactions(), loadFlaggedTransactions()]);
+    } catch (err) {
+      console.error("Sync error:", err);
+    } finally {
+      setSyncing(false);
+    }
   }
 
   const loadTransactions = useCallback(async () => {
@@ -1596,6 +1617,15 @@ export default function TransactionsPage() {
             className="flex items-center gap-2 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--glass-hover-subtle)] border border-[var(--glass-border)] text-[var(--text-dim)] hover:text-[var(--text)] rounded-lg text-sm font-medium transition-all"
           >
             <Upload className="w-4 h-4" /> Import CSV
+          </button>
+          <button
+            onClick={() => void syncTransactions()}
+            disabled={syncing}
+            title="Sync new transactions from your bank"
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--glass-hover-subtle)] border border-[var(--glass-border)] text-[var(--text-dim)] hover:text-[var(--text)] disabled:opacity-50 rounded-lg text-sm font-medium transition-all"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing…" : "Sync"}
           </button>
           <button
             onClick={() => setShowAddModal(true)}
