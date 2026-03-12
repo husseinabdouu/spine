@@ -7,6 +7,20 @@ import AppShell from "@/components/AppShell";
 import ReactMarkdown from "react-markdown";
 import { Moon, Heart, Activity, Send, RefreshCw } from "lucide-react";
 
+/** Midnight today in America/New_York, returned as a UTC ISO string */
+function nycTodayStart(): string {
+  const now = new Date();
+  const nyDateStr = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); // "YYYY-MM-DD"
+  // Build midnight NYC as a Date then convert to ISO
+  const [y, mo, d] = nyDateStr.split("-").map(Number);
+  // Create the date as NYC midnight via Intl trick: find the UTC offset at that moment
+  const candidate = new Date(Date.UTC(y, mo - 1, d, 5, 0, 0)); // 05:00 UTC ≈ midnight EST
+  // Fine-tune: parse the actual NYC hour at candidate
+  const nycHour = parseInt(candidate.toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false }), 10);
+  candidate.setUTCHours(candidate.getUTCHours() - nycHour);
+  return candidate.toISOString();
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -120,14 +134,29 @@ export default function InsightsPage() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const hasGeneratedOpening = useRef(false);
 
-  useEffect(() => { checkAuth(); }, []);
+  useEffect(() => { void checkAuth(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-generate a daily opening once data + messages are loaded
+  useEffect(() => {
+    if (!dataLoaded || hasGeneratedOpening.current) return;
+    if (messages.length === 0) {
+      hasGeneratedOpening.current = true;
+      void generateOpening();
+    }
+  }, [dataLoaded, messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   async function loadMessages() {
+    // Only load today's messages (America/New_York) — prior-day history carries
+    // stale health numbers that cause hallucinations.
+    const todayStart = nycTodayStart();
     const { data } = await supabase
       .from("backbone_conversations")
       .select("id, role, content, created_at")
+      .gte("created_at", todayStart)
       .order("created_at", { ascending: true });
     if (data) setMessages(data as ConvMessage[]);
     return (data ?? []) as ConvMessage[];
@@ -136,10 +165,59 @@ export default function InsightsPage() {
   async function checkAuth() {
     const { data } = await supabase.auth.getSession();
     if (!data.session) { router.push("/setup"); return; }
+    const uid = data.session.user.id;
     setUserEmail(data.session.user.email || null);
-    setUserId(data.session.user.id);
+    setUserId(uid);
+
+    // Delete prior-day messages before loading — keeps the context window clean
+    const todayStart = nycTodayStart();
+    await supabase
+      .from("backbone_conversations")
+      .delete()
+      .eq("user_id", uid)
+      .lt("created_at", todayStart);
+
     await Promise.all([loadData(), loadMessages()]);
     setDataLoaded(true);
+  }
+
+  async function generateOpening() {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData.session?.user.id;
+    const token = sessionData.session?.access_token;
+    if (!uid || !token) return;
+    setIsLoading(true);
+
+    // Build a grounded prompt from verified DB values — never from stale chat history
+    const parts: string[] = [];
+    if (health?.sleep_hours != null)  parts.push(`Sleep ${health.sleep_hours.toFixed(1)}h`);
+    if (health?.hrv_avg != null)      parts.push(`HRV ${health.hrv_avg}ms`);
+    if (insight?.risk_score != null)  parts.push(`Risk score ${insight.risk_score}/100 (${getRiskLabel(insight.risk_score)})`);
+    if (insight?.spending_summary?.change_percent) {
+      const pct = parseFloat(insight.spending_summary.change_percent);
+      if (!isNaN(pct)) parts.push(`Spending ${pct > 0 ? "up" : "down"} ${Math.abs(Math.round(pct))}% vs last week`);
+    }
+    const openingPrompt = parts.length > 0
+      ? `Based on my data today (${parts.join(", ")}), give me a brief 1-2 sentence check-in with the single most important insight. End with one short question.`
+      : "Give me a brief welcome message. Ask what I'd like to explore today about my spending and behavioral patterns.";
+
+    try {
+      const res = await fetch("/api/backbone/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message: openingPrompt, conversationHistory: [] }),
+      });
+      const result = await res.json();
+      if (result.response) {
+        await supabase.from("backbone_conversations").insert({
+          user_id: uid,
+          role: "assistant",
+          content: result.response,
+        });
+        await loadMessages();
+      }
+    } catch { /* silent fail */ }
+    setIsLoading(false);
   }
 
   async function logout() {
@@ -197,6 +275,7 @@ export default function InsightsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           message: text,
+          // messages is already filtered to today-only by loadMessages()
           conversationHistory: messages.slice(-10).map(m => ({ role: m.role, content: m.content })),
         }),
       });
