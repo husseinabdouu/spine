@@ -147,11 +147,8 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
     lowRiskInsights
   );
 
-  const thisMonthStart = new Date(
-    new Date().getFullYear(),
-    new Date().getMonth(),
-    1
-  ).toISOString().split('T')[0];
+  // Use NYC timezone so month boundary matches how dates are stored
+  const thisMonthStart = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }).slice(0, 7) + '-01';
   const thisMonthTransactions =
     transactions?.filter((t) => t.posted_at >= thisMonthStart) ?? [];
   const thisMonthSpend =
