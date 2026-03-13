@@ -93,6 +93,10 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
     Date.now() - 60 * 24 * 60 * 60 * 1000
   ).toLocaleDateString('en-CA', { timeZone: userTz });
 
+  console.log('USER TIMEZONE:', userTz);
+  console.log('TODAY STRING:', today);
+  console.log('HEALTH QUERY DATE:', today);
+
   // Health data
   const { data: healthData } = await supabase
     .from('health_data')
@@ -118,11 +122,9 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
     .order('date', { ascending: false });
 
   // Calculations
-  const allHealthDates = (healthData ?? []).map((h) => h.date);
-  console.log('[Backbone] today (NYC):', today, '| health rows fetched:', healthData?.length ?? 0, '| dates in DB:', allHealthDates.slice(0, 5));
   const todayHealth = healthData?.find((h) => String(h.date).slice(0, 10) === today);
   const todayInsight = insights?.find((i) => String(i.date).slice(0, 10) === today);
-  console.log('[Backbone] todayHealth found:', !!todayHealth, '| todayInsight found:', !!todayInsight);
+  console.log('HEALTH ROW FOUND:', todayHealth ? 'YES' : 'NO', todayHealth);
 
   // Personal health baselines — last 30 days excluding today
   const baselineDays = (healthData ?? []).filter((h) => String(h.date).slice(0, 10) !== today);
