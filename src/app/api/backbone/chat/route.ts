@@ -116,11 +116,14 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
     .order('date', { ascending: false });
 
   // Calculations
-  const todayHealth = healthData?.find((h) => h.date === today);
-  const todayInsight = insights?.find((i) => i.date === today);
+  const allHealthDates = (healthData ?? []).map((h) => h.date);
+  console.log('[Backbone] today (NYC):', today, '| health rows fetched:', healthData?.length ?? 0, '| dates in DB:', allHealthDates.slice(0, 5));
+  const todayHealth = healthData?.find((h) => String(h.date).slice(0, 10) === today);
+  const todayInsight = insights?.find((i) => String(i.date).slice(0, 10) === today);
+  console.log('[Backbone] todayHealth found:', !!todayHealth, '| todayInsight found:', !!todayInsight);
 
   // Personal health baselines — last 30 days excluding today
-  const baselineDays = (healthData ?? []).filter((h) => h.date !== today);
+  const baselineDays = (healthData ?? []).filter((h) => String(h.date).slice(0, 10) !== today);
   const validSleepDays  = baselineDays.filter((h) => h.sleep_hours  != null);
   const validHrvDays    = baselineDays.filter((h) => h.hrv_avg      != null);
   const validStepsDays  = baselineDays.filter((h) => h.active_energy != null);
