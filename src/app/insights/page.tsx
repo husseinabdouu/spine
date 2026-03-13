@@ -226,9 +226,21 @@ export default function InsightsPage() {
   }
 
   const loadData = useCallback(async () => {
+    // Use NYC local date so today's data is fetched correctly regardless of UTC offset
+    const todayNyc = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+
     const [insightRes, healthRes, historyRes] = await Promise.all([
-      supabase.from("behavioral_insights").select("*").order("date", { ascending: false }).limit(1).single(),
-      supabase.from("health_data").select("*").order("date", { ascending: false }).limit(1).single(),
+      // Prefer today's row; fall back to most-recent if none exists yet
+      supabase.from("behavioral_insights").select("*").eq("date", todayNyc).maybeSingle()
+        .then(async (r) => r.data
+          ? r
+          : supabase.from("behavioral_insights").select("*").order("date", { ascending: false }).limit(1).single()
+        ),
+      supabase.from("health_data").select("*").eq("date", todayNyc).maybeSingle()
+        .then(async (r) => r.data
+          ? r
+          : supabase.from("health_data").select("*").order("date", { ascending: false }).limit(1).single()
+        ),
       supabase.from("behavioral_insights").select("date,risk_score").order("date", { ascending: false }).limit(14),
     ]);
     if (insightRes.data) setInsight(insightRes.data);
