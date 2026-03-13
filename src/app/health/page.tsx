@@ -20,7 +20,7 @@ import {
 } from "chart.js";
 import { Line, Chart } from "react-chartjs-2";
 import { format, subDays, parseISO } from "date-fns";
-import { parseLocalDate } from "@/lib/dateUtils";
+import { parseLocalDate, getUserTimezone, todayInTz } from "@/lib/dateUtils";
 import {
   Activity, Moon, Heart, Zap, RefreshCw, ChevronLeft, ChevronRight,
   TrendingUp, TrendingDown, Minus, Flame, Wind,
@@ -202,11 +202,12 @@ export default function HealthPage() {
   async function refreshToday() {
     if (!userId || syncing) return;
     setSyncing(true);
-    const today     = format(new Date(), "yyyy-MM-dd");
-    const yesterday = format(subDays(new Date(), 1), "yyyy-MM-dd");
+    const tz        = getUserTimezone();
+    const today     = todayInTz(tz);
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString("en-CA", { timeZone: tz });
     await Promise.allSettled([
-      fetch("/api/whoop/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, date: today }) }),
-      fetch("/api/whoop/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: userId, date: yesterday }) }),
+      fetch("/api/whoop/sync", { method: "POST", headers: { "Content-Type": "application/json", "x-user-timezone": tz }, body: JSON.stringify({ user_id: userId, date: today }) }),
+      fetch("/api/whoop/sync", { method: "POST", headers: { "Content-Type": "application/json", "x-user-timezone": tz }, body: JSON.stringify({ user_id: userId, date: yesterday }) }),
     ]);
     await loadData(userId, range);
     setSyncing(false);
@@ -242,7 +243,7 @@ export default function HealthPage() {
     : range === "7" ? "7d avg" : `${range}d avg`;
 
   // For the "Today" view show direct values, not averages
-  const todayRow = isToday ? (health.find(h => h.date === format(new Date(), "yyyy-MM-dd")) ?? health.at(-1) ?? null) : null;
+  const todayRow = isToday ? (health.find(h => String(h.date).slice(0, 10) === todayInTz(getUserTimezone())) ?? health.at(-1) ?? null) : null;
   function displayVal(rangeAvg: number | null, todayField: number | null): number | null {
     return isToday ? todayField : rangeAvg;
   }

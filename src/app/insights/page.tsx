@@ -6,20 +6,7 @@ import { supabase } from "@/lib/supabase/client";
 import AppShell from "@/components/AppShell";
 import ReactMarkdown from "react-markdown";
 import { Moon, Heart, Activity, Send, RefreshCw } from "lucide-react";
-
-/** Midnight today in America/New_York, returned as a UTC ISO string */
-function nycTodayStart(): string {
-  const now = new Date();
-  const nyDateStr = now.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); // "YYYY-MM-DD"
-  // Build midnight NYC as a Date then convert to ISO
-  const [y, mo, d] = nyDateStr.split("-").map(Number);
-  // Create the date as NYC midnight via Intl trick: find the UTC offset at that moment
-  const candidate = new Date(Date.UTC(y, mo - 1, d, 5, 0, 0)); // 05:00 UTC ≈ midnight EST
-  // Fine-tune: parse the actual NYC hour at candidate
-  const nycHour = parseInt(candidate.toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false }), 10);
-  candidate.setUTCHours(candidate.getUTCHours() - nycHour);
-  return candidate.toISOString();
-}
+import { getUserTimezone, todayInTz, midnightInTz } from "@/lib/dateUtils";
 
 interface Message {
   role: "user" | "assistant";
@@ -150,9 +137,8 @@ export default function InsightsPage() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   async function loadMessages() {
-    // Only load today's messages (America/New_York) — prior-day history carries
-    // stale health numbers that cause hallucinations.
-    const todayStart = nycTodayStart();
+    // Only load today's messages — prior-day history carries stale health numbers
+    const todayStart = midnightInTz(getUserTimezone());
     const { data } = await supabase
       .from("backbone_conversations")
       .select("id, role, content, created_at")
@@ -170,7 +156,7 @@ export default function InsightsPage() {
     setUserId(uid);
 
     // Delete prior-day messages before loading — keeps the context window clean
-    const todayStart = nycTodayStart();
+    const todayStart = midnightInTz(getUserTimezone());
     await supabase
       .from("backbone_conversations")
       .delete()
@@ -204,7 +190,7 @@ export default function InsightsPage() {
     try {
       const res = await fetch("/api/backbone/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "x-user-timezone": getUserTimezone() },
         body: JSON.stringify({ message: openingPrompt, conversationHistory: [] }),
       });
       const result = await res.json();
@@ -226,17 +212,16 @@ export default function InsightsPage() {
   }
 
   const loadData = useCallback(async () => {
-    // Use NYC local date so today's data is fetched correctly regardless of UTC offset
-    const todayNyc = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const todayLocal = todayInTz(getUserTimezone());
 
     const [insightRes, healthRes, historyRes] = await Promise.all([
       // Prefer today's row; fall back to most-recent if none exists yet
-      supabase.from("behavioral_insights").select("*").eq("date", todayNyc).maybeSingle()
+      supabase.from("behavioral_insights").select("*").eq("date", todayLocal).maybeSingle()
         .then(async (r) => r.data
           ? r
           : supabase.from("behavioral_insights").select("*").order("date", { ascending: false }).limit(1).single()
         ),
-      supabase.from("health_data").select("*").eq("date", todayNyc).maybeSingle()
+      supabase.from("health_data").select("*").eq("date", todayLocal).maybeSingle()
         .then(async (r) => r.data
           ? r
           : supabase.from("health_data").select("*").order("date", { ascending: false }).limit(1).single()
@@ -254,7 +239,7 @@ export default function InsightsPage() {
     try {
       const res = await fetch("/api/insights/calculate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-user-timezone": getUserTimezone() },
         body: JSON.stringify({ user_id: userId }),
       });
       const data = await res.json();
@@ -284,7 +269,7 @@ export default function InsightsPage() {
     try {
       const res = await fetch("/api/backbone/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "x-user-timezone": getUserTimezone() },
         body: JSON.stringify({
           message: text,
           // messages is already filtered to today-only by loadMessages()

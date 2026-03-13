@@ -48,8 +48,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing message' }, { status: 400 });
     }
 
+    // Read user's timezone from header; fall back to America/New_York
+    const userTz = req.headers.get('x-user-timezone') || 'America/New_York';
+
     // 2. Build context
-    const context = await buildBackboneContext(supabase, user.id);
+    const context = await buildBackboneContext(supabase, user.id, userTz);
 
     // 3. Build messages array (last 10 for context window)
     const history = Array.isArray(conversationHistory) ? conversationHistory : [];
@@ -82,14 +85,13 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createClient>>, userId: string) {
-  // Use America/New_York so "today" matches the date stored by the iOS shortcut
-  // and Whoop sync, which run on the user's local clock — not UTC.
-  const TZ = 'America/New_York';
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
+async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createClient>>, userId: string, userTz: string) {
+  // Use the user's local timezone so "today" matches the date stored by the
+  // iOS shortcut and Whoop sync, which run on the user's local clock.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: userTz }); // YYYY-MM-DD
   const sixtyDaysAgo = new Date(
     Date.now() - 60 * 24 * 60 * 60 * 1000
-  ).toLocaleDateString('en-CA', { timeZone: TZ });
+  ).toLocaleDateString('en-CA', { timeZone: userTz });
 
   // Health data
   const { data: healthData } = await supabase
@@ -150,8 +152,7 @@ async function buildBackboneContext(supabase: Awaited<ReturnType<typeof createCl
     lowRiskInsights
   );
 
-  // Use NYC timezone so month boundary matches how dates are stored
-  const thisMonthStart = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }).slice(0, 7) + '-01';
+  const thisMonthStart = new Date().toLocaleDateString('en-CA', { timeZone: userTz }).slice(0, 7) + '-01';
   const thisMonthTransactions =
     transactions?.filter((t) => t.posted_at >= thisMonthStart) ?? [];
   const thisMonthSpend =

@@ -108,6 +108,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
     }
 
+    // Use user's timezone to compute date strings correctly
+    const req = request as import('next/server').NextRequest;
+    const userTz = req.headers?.get?.('x-user-timezone') || 'America/New_York';
+
     const supabase    = createClient();
     const accessToken = await getValidAccessToken(supabase, userId);
 
@@ -120,9 +124,8 @@ export async function POST(request: Request) {
       let synced = 0;
 
       for (let i = 1; i <= days; i++) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dateStr = d.toISOString().split("T")[0];
+        const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        const dateStr = d.toLocaleDateString("en-CA", { timeZone: userTz });
 
         try {
           const result = await syncOneDay(supabase, accessToken, userId, dateStr);
@@ -138,9 +141,8 @@ export async function POST(request: Request) {
     }
 
     // ── Single-day mode ───────────────────────────────────────────────────────
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const syncDate: string = body.date ?? yesterday.toISOString().split("T")[0];
+    const yesterdayStr = new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString("en-CA", { timeZone: userTz });
+    const syncDate: string = body.date ?? yesterdayStr;
 
     const result = await syncOneDay(supabase, accessToken, userId, syncDate);
 

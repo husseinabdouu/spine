@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { calculateBehavioralRisk } from '@/lib/insights/calculate-risk';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const { user_id, date } = await request.json();
 
@@ -10,9 +10,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing user_id' }, { status: 400 });
     }
 
-    // Default to today; if no health data exists for today, the risk engine
-    // will automatically fall back to the most recent available day
-    const targetDate = date ?? new Date().toISOString().split('T')[0];
+    // Use user's timezone from header to compute "today" correctly
+    const userTz = request.headers.get('x-user-timezone') || 'America/New_York';
+    const targetDate = date ?? new Date().toLocaleDateString('en-CA', { timeZone: userTz });
     const supabase = await createClient();
 
     const result = await calculateBehavioralRisk(supabase, user_id, targetDate);

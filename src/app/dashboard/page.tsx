@@ -20,7 +20,7 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import { format, subDays, startOfMonth } from "date-fns";
-import { parseLocalDate } from "@/lib/dateUtils";
+import { parseLocalDate, getUserTimezone, todayInTz, midnightInTz } from "@/lib/dateUtils";
 import { getBehavioralWeight } from "@/lib/categorize";
 import {
   ArrowUpRight,
@@ -370,8 +370,9 @@ export default function DashboardPage() {
    * No loading state, no toast. Refreshes health + insights when done.
    */
   async function silentWhoopSync(uid: string, rows: HealthRow[]) {
-    const today = format(new Date(), "yyyy-MM-dd");
-    const todayRow = rows.find(r => r.date === today);
+    const tz = getUserTimezone();
+    const today = todayInTz(tz);
+    const todayRow = rows.find(r => String(r.date).slice(0, 10) === today);
 
     const needsSync = !todayRow || (() => {
       if (!todayRow.created_at) return true;
@@ -384,7 +385,7 @@ export default function DashboardPage() {
     try {
       await fetch("/api/whoop/sync", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-user-timezone": tz },
         body: JSON.stringify({ user_id: uid, date: today }),
       });
       // Refresh health data and risk score silently after sync
@@ -410,7 +411,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch("/api/insights/calculate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-user-timezone": getUserTimezone() },
         body: JSON.stringify({ user_id: userId }),
       });
       const data = await res.json();
@@ -479,14 +480,13 @@ export default function DashboardPage() {
   }
 
   async function loadConversation() {
-    // Only load today's messages — prior-day messages carry stale/hallucinated
-    // health numbers that the model anchors on and repeats.
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    // Only load today's messages (user local timezone) — prior-day messages
+    // carry stale/hallucinated health numbers that the model anchors on.
+    const todayStart = midnightInTz(getUserTimezone());
     const { data } = await supabase
       .from("backbone_conversations")
       .select("id, role, content, created_at")
-      .gte("created_at", todayStart.toISOString())
+      .gte("created_at", todayStart)
       .order("created_at", { ascending: true });
     setMiniMessages((data ?? []) as ConvMessage[]);
   }
@@ -501,13 +501,12 @@ export default function DashboardPage() {
     // Clear any existing conversation rows for today before generating a fresh
     // opening. This prevents yesterday's or an earlier session's hallucinated
     // numbers from leaking into the new context window.
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = midnightInTz(getUserTimezone());
     await supabase
       .from("backbone_conversations")
       .delete()
       .eq("user_id", userId)
-      .gte("created_at", todayStart.toISOString());
+      .gte("created_at", todayStart);
 
     // Build a grounded opening prompt using only verified values from state —
     // these come from the DB query in loadHealthData(), not from chat history.
@@ -526,7 +525,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch("/api/backbone/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "x-user-timezone": getUserTimezone() },
         // Never pass prior conversation history to the opening — the system
         // prompt context is already fully grounded with today's DB data.
         body: JSON.stringify({ message: openingPrompt, conversationHistory: [] }),
@@ -556,7 +555,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch("/api/backbone/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "x-user-timezone": getUserTimezone() },
         body: JSON.stringify({
           message: text,
           // miniMessages is already filtered to today-only by loadConversation —
@@ -582,7 +581,7 @@ export default function DashboardPage() {
 
   // ── Derived data ───────────────────────────────────────────────────────────
 
-  const today       = format(new Date(), "yyyy-MM-dd");
+  const today       = todayInTz(getUserTimezone());
   const todayInsight = useMemo(
     () => insightsHistory.find(i => i.date === today) ?? insightsHistory[0] ?? null,
     [insightsHistory, today],
